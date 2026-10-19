@@ -47,3 +47,10 @@ struct Transfer: Identifiable, Equatable {
         filename.split(whereSeparator: { $0 == "\\" || $0 == "/" }).last.map(String.init) ?? filename
     }
 }
+
+/// Outcome of asking to download a file.
+enum DownloadStartResult: Equatable {
+    case added(Transfer)
+    case alreadyDownloading(Transfer)
+    case alreadyDownloaded(Transfer)
+}

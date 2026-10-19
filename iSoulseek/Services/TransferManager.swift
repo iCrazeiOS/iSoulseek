@@ -102,31 +102,45 @@ final class TransferManager {
     // MARK: Downloads
 
     @discardableResult
-    func enqueueDownload(username: String, filename: String, size: UInt64) -> Transfer? {
+    func enqueueDownload(username: String, filename: String, size: UInt64) -> DownloadStartResult? {
         guard let url = PathSanitizer.destination(in: downloadsDirectory, virtualPath: filename) else {
             return nil
         }
 
-        let key = Self.key(username: username, filename: filename)
-        if let existing = downloadsByKey[key], let transfer = transfers.first(where: { $0.id == existing }) {
-            return transfer
+        let destination = url.standardizedFileURL.path.lowercased()
+        if let active = downloads.values.first(where: {
+            $0.url.standardizedFileURL.path.lowercased() == destination
+        }), let transfer = transfers.first(where: { $0.id == active.id }) {
+            return .alreadyDownloading(transfer)
         }
 
         let id = allocateToken()
-        var download = Download(id: id, username: username, filename: filename, key: key,
-                                url: url, expectedSize: size, offset: 0, transferred: 0)
-        download.offset = existingSize(of: url, limit: size)
+        let key = Self.key(username: username, filename: filename)
+        let existingBytes = fileSize(of: url) ?? 0
+        let offset: UInt64
+        if size == 0 {
+            offset = 0
+        } else if existingBytes == size {
+            offset = size
+        } else if existingBytes > size {
+            offset = 0
+        } else {
+            offset = existingBytes
+        }
+
+        let download = Download(id: id, username: username, filename: filename, key: key,
+                                url: url, expectedSize: size, offset: offset, transferred: 0)
 
         var transfer = Transfer(id: id, username: username, filename: filename,
-                                size: size > 0 ? size : download.offset, isUpload: false)
-        transfer.transferred = download.offset
-        transfer.state = download.offset > 0 && download.offset == size ? .completed : .negotiating
+                                size: size > 0 ? size : offset, isUpload: false)
+        transfer.transferred = offset
+        transfer.state = size > 0 && offset == size ? .completed : .negotiating
         transfers.append(transfer)
         onUpdate?(transfer)
 
         guard transfer.state != .completed else {
             discardDownload(id)
-            return transfer
+            return .alreadyDownloaded(transfer)
         }
 
         downloads[id] = download
@@ -146,7 +160,7 @@ final class TransferManager {
             self.scheduleNegotiationTimeout(id)
         }
 
-        return transfer
+        return .added(transfer)
     }
 
     func cancel(id: UInt32) {
@@ -679,6 +693,7 @@ final class TransferManager {
                 self.queue.async { completion(nil) }
                 return
             }
+            try? handle.truncate(atOffset: offset)
             try? handle.seek(toOffset: offset)
             self.queue.async { completion(handle) }
         }
@@ -750,16 +765,6 @@ final class TransferManager {
         guard let index = transfers.firstIndex(where: { $0.id == id }) else { return }
         mutate(&transfers[index])
         onUpdate?(transfers[index])
-    }
-
-    private func existingSize(of url: URL, limit: UInt64) -> UInt64 {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attributes[.size] as? NSNumber else {
-            return 0
-        }
-        let value = size.uint64Value
-        if limit > 0 && value >= limit { return limit }
-        return value
     }
 
     private func fileSize(of url: URL) -> UInt64? {

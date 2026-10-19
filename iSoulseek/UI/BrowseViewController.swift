@@ -167,10 +167,18 @@ final class BrowseViewController: UIViewController {
 
     private func download(file: ShareFile, in folder: ShareFolder) {
         let path = folder.path + "\\" + file.name
-        client.download(username: username, filename: path, size: file.size) { [weak self] transfer in
+        client.download(username: username, filename: path, size: file.size) { [weak self] outcome in
             guard let self else { return }
-            Theme.showToast(transfer == nil ? "Could not download \(file.name)"
-                                            : "Added \(file.name) to downloads", in: self.view)
+            switch outcome {
+            case .added:
+                Theme.showToast("Added \(file.name) to downloads", in: self.view)
+            case .alreadyDownloading:
+                Theme.showToast("Already downloading \(file.name)", in: self.view)
+            case .alreadyDownloaded:
+                Theme.showToast("Already downloaded \(file.name)", in: self.view)
+            case nil:
+                Theme.showToast("Could not download \(file.name)", in: self.view)
+            }
         }
     }
 

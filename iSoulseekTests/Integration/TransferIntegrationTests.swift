@@ -85,6 +85,31 @@ final class TransferIntegrationTests: XCTestCase {
         XCTAssertEqual((try? Data(contentsOf: destination)), payload)
     }
 
+    /// A different file already occupying the destination must be replaced, not appended to.
+    func testExistingLargerFileIsReplaced() {
+        let payload = makePayload(512)
+        env.peer.downloadPayload = payload
+        let filename = "Music\\replace.bin"
+        let destination = env.downloadsDirectory.appendingPathComponent("Music/replace.bin")
+
+        try? FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        try? Data(repeating: 0xEE, count: payload.count * 2).write(to: destination)
+
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        var transfers: [Transfer] = []
+        let cancellable = env.client.transferChanges.sink { transfers.append($0) }
+        defer { cancellable.cancel() }
+
+        env.client.download(username: "MockPeer", filename: filename, size: UInt64(payload.count))
+        assertEventually("download never completed", timeout: 3) {
+            transfers.last(where: { !$0.isUpload })?.state == .completed
+        }
+
+        XCTAssertEqual((try? Data(contentsOf: destination)), payload)
+    }
+
     /// The uploader cannot reach our listener, so it asks the server to have us dial it instead.
     func testDownloadCompletesViaIndirectConnection() {
         let payload = makePayload(3000)

@@ -379,12 +379,17 @@ final class SearchViewController: UIViewController {
     // MARK: Actions
 
     private func download(_ result: SearchResult) {
-        client.download(username: result.username, filename: result.file.name, size: result.file.size) { [weak self] transfer in
+        client.download(username: result.username, filename: result.file.name, size: result.file.size) { [weak self] outcome in
             guard let self else { return }
-            if transfer == nil {
-                Theme.showToast("Could not download \(result.file.name)", in: self.view)
-            } else {
+            switch outcome {
+            case .added:
                 Theme.showToast("Added \(result.file.name) to downloads", in: self.view)
+            case .alreadyDownloading:
+                Theme.showToast("Already downloading \(result.file.name)", in: self.view)
+            case .alreadyDownloaded:
+                Theme.showToast("Already downloaded \(result.file.name)", in: self.view)
+            case nil:
+                Theme.showToast("Could not download \(result.file.name)", in: self.view)
             }
         }
     }

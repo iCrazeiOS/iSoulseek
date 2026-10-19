@@ -170,12 +170,12 @@ final class SoulseekClient {
     }
 
     func download(username: String, filename: String, size: UInt64,
-                  completion: ((Transfer?) -> Void)? = nil) {
+                  completion: ((DownloadStartResult?) -> Void)? = nil) {
         queue.async {
-            let transfer = self.transferManager.enqueueDownload(username: username,
-                                                               filename: filename, size: size)
+            let result = self.transferManager.enqueueDownload(username: username,
+                                                             filename: filename, size: size)
             if let completion {
-                self.replyToMain { completion(transfer) }
+                self.replyToMain { completion(result) }
             }
         }
     }
