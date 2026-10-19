@@ -11,6 +11,7 @@ final class SettingsViewController: UIViewController {
             case value
             case subtitle
             case message
+            case toggle
         }
 
         let title: String
@@ -19,7 +20,9 @@ final class SettingsViewController: UIViewController {
         var accessory: UITableViewCell.AccessoryType = .none
         var style: Style = .value
         var isDestructive = false
+        var isOn = false
         var action: (() -> Void)?
+        var onToggle: ((Bool) -> Void)?
     }
 
     private struct Section {
@@ -68,6 +71,8 @@ final class SettingsViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.setToolbarHidden(true, animated: animated)
+        // Reflect any filter/sort change made from the search screen.
+        rebuild()
     }
 
     private func observeClient() {
@@ -120,6 +125,14 @@ final class SettingsViewController: UIViewController {
             Item(title: "Sign out", isDestructive: true, action: { [weak self] in self?.client.disconnect() }),
         ]
 
+        let searchOptions = store.searchOptions
+        let search = [
+            Item(title: "Sort results", value: searchOptions.sortOrder.displayName,
+                 accessory: .disclosureIndicator, action: { [weak self] in self?.chooseSortOrder() }),
+            Item(title: "Only downloadable", style: .toggle, isOn: searchOptions.onlyFreeSlots,
+                 onToggle: { [weak self] isOn in self?.setOnlyFreeSlots(isOn) }),
+        ]
+
         let shares = [
             Item(title: "Shared folder", subtitle: store.shareDirectory.path, style: .subtitle),
             Item(title: "Folders", value: "\(snapshot.folderCount)"),
@@ -140,6 +153,10 @@ final class SettingsViewController: UIViewController {
         sections = [
             Section(header: "Connection", footer: nil, items: connection),
             Section(header: "Account", footer: nil, items: account),
+            Section(header: "Search results",
+                    footer: "Applied to every search. 'Only downloadable' hides results whose peer has "
+                        + "no free slot; you can still change both from the search screen.",
+                    items: search),
             Section(header: "Shares",
                     footer: "Anything placed in this folder is shared with every user who browses you. "
                         + "The folder is visible in the Files app under On My iPhone ▸ Soulseek ▸ Shared.",
@@ -195,6 +212,32 @@ final class SettingsViewController: UIViewController {
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         Theme.configurePopover(alert, in: tableView)
         present(alert, animated: true)
+    }
+
+    private func chooseSortOrder() {
+        let alert = UIAlertController(title: "Sort results",
+                                      message: "How search results are ordered.",
+                                      preferredStyle: .actionSheet)
+        for order in SearchSortOrder.allCases {
+            let title = order == client.store.searchOptions.sortOrder ? "✓ \(order.displayName)" : order.displayName
+            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                guard let self else { return }
+                var options = self.client.store.searchOptions
+                options.sortOrder = order
+                self.client.store.searchOptions = options
+                self.rebuild()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        Theme.configurePopover(alert, in: tableView)
+        present(alert, animated: true)
+    }
+
+    private func setOnlyFreeSlots(_ isOn: Bool) {
+        var options = client.store.searchOptions
+        options.onlyFreeSlots = isOn
+        client.store.searchOptions = options
+        rebuild()
     }
 
     private func promptForText(title: String, message: String?, current: String,
@@ -277,6 +320,21 @@ extension SettingsViewController: UITableViewDataSource {
             cell.textLabel?.textColor = .secondaryLabel
             cell.textLabel?.numberOfLines = 0
             cell.accessoryType = .none
+            cell.selectionStyle = .none
+            return cell
+
+        case .toggle:
+            let cell = tableView.dequeueReusableCell(withIdentifier: "toggle")
+                ?? UITableViewCell(style: .default, reuseIdentifier: "toggle")
+            cell.textLabel?.text = item.title
+            cell.textLabel?.font = .preferredFont(forTextStyle: .body)
+            cell.textLabel?.adjustsFontForContentSizeCategory = true
+            cell.textLabel?.textColor = .label
+            let toggle = UISwitch()
+            toggle.isOn = item.isOn
+            toggle.addAction(UIAction { [weak toggle] _ in item.onToggle?(toggle?.isOn ?? false) },
+                             for: .valueChanged)
+            cell.accessoryView = toggle
             cell.selectionStyle = .none
             return cell
         }
