@@ -471,6 +471,9 @@ private final class SearchResultCell: UITableViewCell {
         badge.layer.cornerRadius = 6
         badge.layer.cornerCurve = .continuous
         badge.clipsToBounds = true
+        // The badge must keep its natural width; the title truncates instead.
+        badge.setContentHuggingPriority(.required, for: .horizontal)
+        badge.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         texts.axis = .vertical
         texts.spacing = 2
@@ -483,6 +486,7 @@ private final class SearchResultCell: UITableViewCell {
         trailing.alignment = .trailing
         trailing.spacing = 4
         trailing.setContentHuggingPriority(.required, for: .horizontal)
+        trailing.setContentCompressionResistancePriority(.required, for: .horizontal)
         trailing.addArrangedSubview(badge)
 
         let row = UIStackView(arrangedSubviews: [texts, trailing])
