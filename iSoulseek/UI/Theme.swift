@@ -70,8 +70,115 @@ enum Theme {
     }
 }
 
+/// A text field drawn as a filled, rounded inset.
+///
+/// The `roundedRect` border style reads as a dated box; this is the modern iOS form
+/// field instead: a soft filled background, a capsule shape, roomy padding and a focus
+/// ring while the field is being edited.
+final class InsetTextField: UITextField {
+
+    /// Space between the edge of the field and its text.
+    private static let textPadding: CGFloat = 16
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        borderStyle = .none
+        backgroundColor = .secondarySystemBackground
+        layer.cornerCurve = .continuous
+        layer.masksToBounds = true
+        observeEditing()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // A capsule stays a capsule when the field grows with the user's text size.
+        layer.cornerRadius = bounds.height / 2
+    }
+
+    // MARK: Editing state
+
+    private func observeEditing() {
+        NotificationCenter.default.addObserver(self, selector: #selector(editingDidBegin),
+                                               name: UITextField.textDidBeginEditingNotification, object: self)
+        NotificationCenter.default.addObserver(self, selector: #selector(editingDidEnd),
+                                               name: UITextField.textDidEndEditingNotification, object: self)
+    }
+
+    @objc private func editingDidBegin() {
+        setFocusRing(true)
+    }
+
+    @objc private func editingDidEnd() {
+        setFocusRing(false)
+    }
+
+    private func setFocusRing(_ visible: Bool) {
+        // `UITextField.tintColor` is nullable, so fall back to the system tint.
+        let color = tintColor ?? .systemBlue
+        UIView.animate(withDuration: 0.2) {
+            self.layer.borderWidth = visible ? 1.5 : 0
+            self.layer.borderColor = color.cgColor
+        }
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        layer.borderColor = (tintColor ?? .systemBlue).cgColor
+    }
+
+    // MARK: Text insets
+
+    override func textRect(forBounds bounds: CGRect) -> CGRect {
+        bounds.inset(by: UIEdgeInsets(top: 0, left: Self.textPadding,
+                                      bottom: 0, right: Self.textPadding))
+    }
+
+    override func editingRect(forBounds bounds: CGRect) -> CGRect {
+        textRect(forBounds: bounds)
+    }
+
+    override func placeholderRect(forBounds bounds: CGRect) -> CGRect {
+        textRect(forBounds: bounds)
+    }
+}
+
+/// A label that wraps onto several lines.
+///
+/// `UILabel` only reports a multi-line intrinsic height once `preferredMaxLayoutWidth`
+/// is set, so a plain label inside a stack view is laid out one line high and
+/// truncates its text instead of wrapping it.
+class WrappingLabel: UILabel {
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        numberOfLines = 0
+        lineBreakMode = .byWordWrapping
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard preferredMaxLayoutWidth != bounds.width else { return }
+        preferredMaxLayoutWidth = bounds.width
+        invalidateIntrinsicContentSize()
+    }
+}
+
 /// A label with internal padding and a matching intrinsic size, used for badges and toasts.
-final class BadgeLabel: UILabel {
+final class BadgeLabel: WrappingLabel {
 
     var contentInsets = UIEdgeInsets(top: 2, left: 7, bottom: 2, right: 7) {
         didSet { invalidateIntrinsicContentSize() }
@@ -93,8 +200,8 @@ final class MessageView: UIView {
 
     private let stack = UIStackView()
     private let spinner = UIActivityIndicatorView(style: .medium)
-    private let titleLabel = UILabel()
-    private let messageLabel = UILabel()
+    private let titleLabel = WrappingLabel()
+    private let messageLabel = WrappingLabel()
     private let actionButton = UIButton(type: .system)
 
     var onAction: (() -> Void)?

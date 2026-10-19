@@ -4,20 +4,45 @@ import UIKit
 /// Sign-in form. Credentials are copied into the store, then the client connects.
 final class LoginViewController: UIViewController {
 
+    /// Layout metrics for the form. The column is as wide as the screen allows but never
+    /// wider than `maxColumnWidth`, so the form reads the same on a phone and on an iPad.
+    private enum Metrics {
+        static let maxColumnWidth: CGFloat = 440
+        static let horizontalInset: CGFloat = 24
+        static let accessibilityHorizontalInset: CGFloat = 16
+        static let verticalInset: CGFloat = 24
+        static let spacing: CGFloat = 16
+        static let accessibilitySpacing: CGFloat = 24
+        static let statusSpacing: CGFloat = 8
+        static let fieldMinHeight: CGFloat = 50
+        static let buttonMinHeight: CGFloat = 48
+        static let indicatorWidth: CGFloat = 20
+    }
+
     private let client: SoulseekClient
     private var cancellables = Set<AnyCancellable>()
 
     private let scrollView = UIScrollView()
     private let container = UIView()
     private let contentStack = UIStackView()
-    private let titleLabel = UILabel()
-    private let subtitleLabel = UILabel()
-    private let usernameField = UITextField()
-    private let passwordField = UITextField()
+    private let titleLabel = WrappingLabel()
+    private let subtitleLabel = WrappingLabel()
+    private let usernameField = InsetTextField()
+    private let passwordField = InsetTextField()
     private let signInButton = UIButton(type: .system)
     private let spinner = UIActivityIndicatorView(style: .medium)
-    private let statusLabel = UILabel()
-    private let footnoteLabel = UILabel()
+    private let statusLabel = WrappingLabel()
+    private let statusRow = UIView()
+    private let statusStack = UIStackView()
+    private let footnoteLabel = WrappingLabel()
+
+    /// Width of the form column. Kept as a constraint so the column follows the screen
+    /// instead of being pinned to a fixed number of points.
+    private var columnWidthConstraint: NSLayoutConstraint!
+    private var columnAvailableConstraint: NSLayoutConstraint!
+
+    /// Whether the status row is currently showing a failure.
+    private var statusIsError = false
 
     init(client: SoulseekClient) {
         self.client = client
@@ -33,6 +58,7 @@ final class LoginViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         buildLayout()
+        applyMetrics()
         observeClient()
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
@@ -44,24 +70,38 @@ final class LoginViewController: UIViewController {
         update(state: client.stateChanges.value)
     }
 
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.preferredContentSizeCategory
+                != traitCollection.preferredContentSizeCategory else { return }
+        applyMetrics()
+        updateTitleFont()
+    }
+
     // MARK: Layout
+
+    /// The title is a bold version of the large title font, kept in step with the
+    /// user's text size.
+    private func updateTitleFont() {
+        let size = UIFont.preferredFont(forTextStyle: .largeTitle, compatibleWith: traitCollection).pointSize
+        titleLabel.font = .systemFont(ofSize: size, weight: .bold)
+    }
 
     private func buildLayout() {
         titleLabel.text = "iSoulseek"
-        titleLabel.font = .preferredFont(forTextStyle: .largeTitle)
-        titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.textAlignment = .center
+        updateTitleFont()
 
-        subtitleLabel.text = "Search, browse and download from the Soulseek network."
+        subtitleLabel.text = "Search, download, and share on Soulseek"
         subtitleLabel.font = .preferredFont(forTextStyle: .subheadline)
         subtitleLabel.adjustsFontForContentSizeCategory = true
         subtitleLabel.textColor = .secondaryLabel
         subtitleLabel.textAlignment = .center
-        subtitleLabel.numberOfLines = 0
 
         configure(usernameField, placeholder: "Username", contentType: .username, returnKey: .next)
         configure(passwordField, placeholder: "Password", contentType: .password, returnKey: .go)
         passwordField.isSecureTextEntry = true
+        usernameField.clearButtonMode = .whileEditing
         usernameField.accessibilityIdentifier = "login.username"
         passwordField.accessibilityIdentifier = "login.password"
         signInButton.accessibilityIdentifier = "login.submit"
@@ -70,7 +110,14 @@ final class LoginViewController: UIViewController {
 
         var configuration = UIButton.Configuration.filled()
         configuration.title = "Sign in"
-        configuration.cornerStyle = .medium
+        configuration.cornerStyle = .capsule
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16)
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { [weak self] incoming in
+            var outgoing = incoming
+            outgoing.font = .preferredFont(forTextStyle: .headline,
+                                           compatibleWith: self?.traitCollection ?? UITraitCollection())
+            return outgoing
+        }
         signInButton.configuration = configuration
         signInButton.addTarget(self, action: #selector(signInTapped), for: .touchUpInside)
 
@@ -79,44 +126,59 @@ final class LoginViewController: UIViewController {
         statusLabel.font = .preferredFont(forTextStyle: .footnote)
         statusLabel.adjustsFontForContentSizeCategory = true
         statusLabel.textColor = .secondaryLabel
-        statusLabel.numberOfLines = 0
         statusLabel.textAlignment = .center
 
-        footnoteLabel.text = "A new username is registered automatically the first time you sign in. "
-            + "There is no password reset, so choose a password you will remember."
+        footnoteLabel.text = "New usernames are created automatically. Passwords cannot be reset."
         footnoteLabel.font = .preferredFont(forTextStyle: .footnote)
         footnoteLabel.adjustsFontForContentSizeCategory = true
         footnoteLabel.textColor = .tertiaryLabel
-        footnoteLabel.numberOfLines = 0
         footnoteLabel.textAlignment = .center
 
-        let statusRow = UIStackView(arrangedSubviews: [spinner, statusLabel])
-        statusRow.axis = .horizontal
-        statusRow.spacing = 8
-        statusRow.alignment = .center
+        // The spinner and the text are laid out as one centred group, so the text sits
+        // in the middle of the screen on its own and only shifts when the spinner shows.
+        statusStack.axis = .horizontal
+        statusStack.spacing = Metrics.statusSpacing
+        statusStack.alignment = .center
+        statusStack.translatesAutoresizingMaskIntoConstraints = false
+        statusStack.addArrangedSubview(spinner)
+        statusStack.addArrangedSubview(statusLabel)
+        statusLabel.setContentHuggingPriority(.required, for: .horizontal)
+        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        statusRow.addSubview(statusStack)
+        statusRow.isHidden = true
 
         contentStack.axis = .vertical
-        contentStack.spacing = 16
         contentStack.alignment = .fill
+        contentStack.spacing = Metrics.spacing
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         [titleLabel, subtitleLabel, usernameField, passwordField, signInButton, statusRow, footnoteLabel]
             .forEach { contentStack.addArrangedSubview($0) }
 
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.alwaysBounceVertical = true
+        scrollView.keyboardDismissMode = .interactive
+        // The scroll view already sits inside the safe area, so it must not add the
+        // safe area insets a second time.
+        scrollView.contentInsetAdjustmentBehavior = .never
         container.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(scrollView)
         scrollView.addSubview(container)
         container.addSubview(contentStack)
 
-        let width = contentStack.widthAnchor.constraint(equalTo: container.widthAnchor, constant: -48)
-        width.priority = .defaultHigh
+        // The column fills the screen minus the insets, but stops at a comfortable
+        // reading width on larger screens.
+        columnWidthConstraint = contentStack.widthAnchor
+            .constraint(equalTo: container.widthAnchor, constant: -2 * Metrics.horizontalInset)
+        columnWidthConstraint.priority = .defaultHigh
+        columnAvailableConstraint = contentStack.widthAnchor
+            .constraint(lessThanOrEqualTo: container.widthAnchor, constant: -2 * Metrics.horizontalInset)
 
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
 
             container.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
@@ -128,21 +190,39 @@ final class LoginViewController: UIViewController {
 
             contentStack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             contentStack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            contentStack.topAnchor.constraint(greaterThanOrEqualTo: container.topAnchor, constant: 24),
-            contentStack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -24),
-            contentStack.widthAnchor.constraint(lessThanOrEqualToConstant: 420),
-            width,
+            contentStack.topAnchor.constraint(greaterThanOrEqualTo: container.topAnchor,
+                                              constant: Metrics.verticalInset),
+            contentStack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor,
+                                                 constant: -Metrics.verticalInset),
+            contentStack.widthAnchor.constraint(lessThanOrEqualToConstant: Metrics.maxColumnWidth),
+            columnWidthConstraint,
+            columnAvailableConstraint,
 
-            usernameField.heightAnchor.constraint(equalToConstant: 44),
-            passwordField.heightAnchor.constraint(equalToConstant: 44),
-            signInButton.heightAnchor.constraint(equalToConstant: 48),
+            spinner.widthAnchor.constraint(equalToConstant: Metrics.indicatorWidth),
+            statusStack.centerXAnchor.constraint(equalTo: statusRow.centerXAnchor),
+            statusStack.topAnchor.constraint(equalTo: statusRow.topAnchor),
+            statusStack.bottomAnchor.constraint(equalTo: statusRow.bottomAnchor),
+            statusStack.leadingAnchor.constraint(greaterThanOrEqualTo: statusRow.leadingAnchor),
+            statusStack.trailingAnchor.constraint(lessThanOrEqualTo: statusRow.trailingAnchor),
+            usernameField.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.fieldMinHeight),
+            passwordField.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.fieldMinHeight),
+            signInButton.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.buttonMinHeight),
         ])
     }
 
-    private func configure(_ field: UITextField, placeholder: String,
+    /// Applies the metrics that depend on the user's text size.
+    private func applyMetrics() {
+        let isAccessibility = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+        contentStack.spacing = isAccessibility ? Metrics.accessibilitySpacing : Metrics.spacing
+
+        let inset = isAccessibility ? Metrics.accessibilityHorizontalInset : Metrics.horizontalInset
+        columnWidthConstraint.constant = -2 * inset
+        columnAvailableConstraint.constant = -2 * inset
+    }
+
+    private func configure(_ field: InsetTextField, placeholder: String,
                            contentType: UITextContentType, returnKey: UIReturnKeyType) {
         field.placeholder = placeholder
-        field.borderStyle = .roundedRect
         field.textContentType = contentType
         field.returnKeyType = returnKey
         field.autocapitalizationType = .none
@@ -162,14 +242,14 @@ final class LoginViewController: UIViewController {
 
         client.messages
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] message in self?.setStatus(message, isError: false) }
+            .sink { [weak self] message in self?.showMessage(message) }
             .store(in: &cancellables)
     }
 
     private func update(state: ConnectionState) {
         switch state {
         case .disconnected:
-            setStatus("Not connected", isError: false)
+            setStatus(nil, isError: false)
             setBusy(false)
         case .connecting, .connectingToServer:
             setStatus(state.description, isError: false)
@@ -192,9 +272,18 @@ final class LoginViewController: UIViewController {
         signInButton.isEnabled = !busy
     }
 
-    private func setStatus(_ text: String, isError: Bool) {
+    /// Shows `text` under the button. A `nil` text hides the row entirely.
+    private func setStatus(_ text: String?, isError: Bool) {
         statusLabel.text = text
         statusLabel.textColor = isError ? .systemRed : .secondaryLabel
+        statusRow.isHidden = text?.isEmpty ?? true
+        statusIsError = isError
+    }
+
+    /// Shows a status message from the client, unless a failure is already being shown.
+    private func showMessage(_ message: String) {
+        guard !statusIsError else { return }
+        setStatus(message, isError: false)
     }
 
     // MARK: Actions
@@ -231,5 +320,15 @@ extension LoginViewController: UITextFieldDelegate {
             signInTapped()
         }
         return true
+    }
+
+    func textFieldDidBeginEditing(_ textField: UITextField) {
+        // The keyboard covers the lower half of the screen, so make sure the field
+        // being edited stays visible.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let rect = textField.convert(textField.bounds, to: scrollView)
+            scrollView.scrollRectToVisible(rect.insetBy(dx: 0, dy: -Metrics.verticalInset), animated: true)
+        }
     }
 }
