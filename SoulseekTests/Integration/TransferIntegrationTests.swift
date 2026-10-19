@@ -108,6 +108,41 @@ final class TransferIntegrationTests: XCTestCase {
         XCTAssertEqual((try? Data(contentsOf: destination)), payload)
     }
 
+    /// Deleting a completed download removes the file and any folders it left empty.
+    func testDeletingCompletedDownloadRemovesFile() {
+        let payload = makePayload(2048)
+        env.peer.downloadPayload = payload
+        let filename = "Music\\Album\\deleteme.bin"
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        var transfers: [Transfer] = []
+        let cancellable = env.client.transferChanges.sink { transfers.append($0) }
+        defer { cancellable.cancel() }
+
+        env.client.download(username: "MockPeer", filename: filename, size: UInt64(payload.count))
+        assertEventually("download never completed", timeout: 3) {
+            transfers.last(where: { !$0.isUpload })?.state == .completed
+        }
+
+        let destination = env.downloadsDirectory.appendingPathComponent("Music/Album/deleteme.bin")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+
+        guard let id = transfers.last(where: { !$0.isUpload && $0.state == .completed })?.id else {
+            return XCTFail("no completed download to delete")
+        }
+        env.client.deleteTransfer(id: id, deleteFile: true)
+
+        assertEventually("file was not deleted", timeout: 3) {
+            !FileManager.default.fileExists(atPath: destination.path)
+        }
+        XCTAssertTrue(env.client.transfers().allSatisfy { $0.id != id })
+        assertEventually("empty folders were not cleaned up", timeout: 3) {
+            !FileManager.default.fileExists(atPath: env.downloadsDirectory.appendingPathComponent("Music").path)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: env.downloadsDirectory.path),
+                      "the downloads root must be kept")
+    }
+
     // MARK: Upload
 
     func testUploadServesSharedFile() {

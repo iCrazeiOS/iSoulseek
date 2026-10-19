@@ -188,6 +188,11 @@ final class SoulseekClient {
         queue.async { self.transferManager.clearFinished() }
     }
 
+    /// Removes a finished transfer; a completed download's file is deleted when `deleteFile` is set.
+    func deleteTransfer(id: UInt32, deleteFile: Bool) {
+        queue.async { self.transferManager.remove(id: id, deleteFile: deleteFile) }
+    }
+
     func transfers() -> [Transfer] {
         var result: [Transfer] = []
         queue.sync { result = self.transferManager.allTransfers }

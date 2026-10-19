@@ -221,10 +221,24 @@ extension DownloadsViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath)
     -> UISwipeActionsConfiguration? {
         let transfer = displayed[indexPath.row]
-        guard transfer.state.isActive else { return nil }
 
-        let action = UIContextualAction(style: .destructive, title: "Cancel") { [weak self] _, _, completion in
-            self?.client.cancelTransfer(id: transfer.id)
+        if transfer.state.isActive {
+            let action = UIContextualAction(style: .destructive, title: "Cancel") { [weak self] _, _, completion in
+                self?.client.cancelTransfer(id: transfer.id)
+                completion(true)
+            }
+            return UISwipeActionsConfiguration(actions: [action])
+        }
+
+        // Deleting a finished download removes the file from disk; other finished rows just go away.
+        let deletesFile = !transfer.isUpload && transfer.state == .completed
+        let title = deletesFile ? "Delete" : "Remove"
+        let action = UIContextualAction(style: .destructive, title: title) { [weak self] _, _, completion in
+            guard let self else { completion(false); return }
+            self.client.deleteTransfer(id: transfer.id, deleteFile: deletesFile)
+            self.transfers = self.client.transfers()
+            self.rebuild()
+            if deletesFile { Theme.showToast("Deleted \(transfer.localFilename)", in: self.view) }
             completion(true)
         }
         return UISwipeActionsConfiguration(actions: [action])

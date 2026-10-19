@@ -173,6 +173,28 @@ final class TransferManager {
         transfers.removeAll { !$0.state.isActive }
     }
 
+    /// Removes one finished transfer. A completed download's file is deleted when `deleteFile` is set;
+    /// partial files from failed or cancelled downloads are kept so a future attempt can resume.
+    @discardableResult
+    func remove(id: UInt32, deleteFile: Bool) -> Bool {
+        guard let index = transfers.firstIndex(where: { $0.id == id }) else { return false }
+        let transfer = transfers[index]
+        guard !transfer.state.isActive else { return false }
+        transfers.remove(at: index)
+
+        guard deleteFile, !transfer.isUpload, transfer.state == .completed,
+              let url = PathSanitizer.destination(in: downloadsDirectory,
+                                                  virtualPath: transfer.filename) else {
+            return true
+        }
+        let root = downloadsDirectory.standardizedFileURL
+        ioQueue.async {
+            try? FileManager.default.removeItem(at: url)
+            Self.removeEmptyParents(of: url, upTo: root)
+        }
+        return true
+    }
+
     func reset() {
         for (_, download) in downloads {
             download.timeout?.cancel()
@@ -724,6 +746,17 @@ final class TransferManager {
             return nil
         }
         return size.uint64Value
+    }
+
+    /// Deletes now-empty directories left behind after a file is removed, without touching the root.
+    private static func removeEmptyParents(of url: URL, upTo root: URL) {
+        var directory = url.deletingLastPathComponent().standardizedFileURL
+        while directory.path.hasPrefix(root.path), directory.path != root.path {
+            let contents = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+            guard contents.isEmpty else { return }
+            try? FileManager.default.removeItem(at: directory)
+            directory = directory.deletingLastPathComponent().standardizedFileURL
+        }
     }
 
     private static func key(username: String, filename: String) -> String {
