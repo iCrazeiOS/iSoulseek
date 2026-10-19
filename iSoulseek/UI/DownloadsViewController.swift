@@ -113,7 +113,7 @@ final class DownloadsViewController: UIViewController {
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-            messageView.topAnchor.constraint(equalTo: tableView.topAnchor),
+            messageView.topAnchor.constraint(equalTo: guide.topAnchor, constant: Theme.emptyStateTopInset),
             messageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             messageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             messageView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
@@ -263,10 +263,12 @@ final class DownloadsViewController: UIViewController {
         messageView.isHidden = false
         if showsCompleted {
             messageView.configure(title: "No completed downloads",
-                                 message: "Files in your Downloads folder appear here.")
+                                 message: "Files in your Downloads folder appear here.",
+                                 symbol: "checkmark.circle")
         } else {
             messageView.configure(title: "No active transfers",
-                                 message: "Files you download appear here, along with anything other users take from your share.")
+                                 message: "Files you download appear here, along with anything other users take from your share.",
+                                 symbol: "arrow.down.circle")
         }
     }
 

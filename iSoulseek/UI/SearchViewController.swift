@@ -145,10 +145,24 @@ final class SearchViewController: UIViewController {
         statusRow.addSubview(statusLabel)
         statusRow.isHidden = true
 
-        let stack = UIStackView(arrangedSubviews: [searchBar, statusRow, tableView])
+        // The search bar is inset from the screen edges, the way the system search bar
+        // sits inside a navigation bar, rather than running the full width of the display.
+        searchBar.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = UIStackView(arrangedSubviews: [statusRow, tableView])
         stack.axis = .vertical
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
+
+        // An overlay rather than the table's `backgroundView`, so the empty state is centred in
+        // the same area as the Downloads tab's (above the safe area's bottom edge) instead of
+        // halfway down the table's full height.
+        messageView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(messageView)
+
+        // Added last so it stays above the empty-state overlay: the overlay starts above the
+        // search bar's bottom edge, and a plain view would otherwise swallow taps on the bar.
+        view.addSubview(searchBar)
 
         NSLayoutConstraint.activate([
             statusLabel.topAnchor.constraint(equalTo: statusRow.topAnchor, constant: 2),
@@ -156,10 +170,20 @@ final class SearchViewController: UIViewController {
             statusLabel.trailingAnchor.constraint(equalTo: statusRow.trailingAnchor, constant: -16),
             statusLabel.bottomAnchor.constraint(equalTo: statusRow.bottomAnchor, constant: -8),
 
-            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            searchBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            searchBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            searchBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+
+            stack.topAnchor.constraint(equalTo: searchBar.bottomAnchor),
             stack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             stack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            messageView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor,
+                                             constant: Theme.emptyStateTopInset),
+            messageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            messageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            messageView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
         ])
     }
 
@@ -314,19 +338,21 @@ final class SearchViewController: UIViewController {
 
     private func updateBackground() {
         guard visibleCount == 0 else {
-            tableView.backgroundView = nil
+            messageView.isHidden = true
             return
         }
         if activeToken != nil {
             messageView.configure(title: "Searching…", message: "Results appear as peers respond.", loading: true)
         } else if hasSearched {
             messageView.configure(title: "No results",
-                                  message: "Try different words, or browse a specific user.")
+                                  message: "Try different words, or browse a specific user.",
+                                  symbol: "music.note.list")
         } else {
             messageView.configure(title: "Find music",
-                                  message: "Search the network by artist, album or file name.")
+                                  message: "Search the network by artist, album or file name.",
+                                  symbol: "magnifyingglass")
         }
-        tableView.backgroundView = messageView
+        messageView.isHidden = false
     }
 
     private func updateStatus() {

@@ -3,6 +3,10 @@ import UIKit
 /// Small shared helpers: transient confirmation, media icons and popover plumbing.
 enum Theme {
 
+    /// Distance from the top safe-area edge to a screen's empty-state area. Shared so the empty
+    /// states line up between tabs even though their headers differ in height.
+    static let emptyStateTopInset: CGFloat = 48
+
     private static let toastTag = 0x7061_6F73
 
     /// Shows a short-lived confirmation near the bottom of `view`.
@@ -198,11 +202,18 @@ final class BadgeLabel: WrappingLabel {
 /// A centred placeholder used for loading, error and empty states.
 final class MessageView: UIView {
 
+    /// Large decorative symbol shown above the title. Sized to fill the empty space
+    /// without competing with the message itself.
+    private static let symbolConfiguration = UIImage.SymbolConfiguration(pointSize: 64, weight: .regular)
+    private static let symbolSide: CGFloat = 72
+
     private let stack = UIStackView()
+    private let symbolView = UIImageView()
     private let spinner = UIActivityIndicatorView(style: .medium)
     private let titleLabel = WrappingLabel()
     private let messageLabel = WrappingLabel()
     private let actionButton = UIButton(type: .system)
+    private var messageHeightConstraint: NSLayoutConstraint?
 
     var onAction: (() -> Void)?
 
@@ -217,7 +228,8 @@ final class MessageView: UIView {
     }
 
     func configure(title: String, message: String? = nil, loading: Bool = false,
-                   actionTitle: String? = nil, onAction: (() -> Void)? = nil) {
+                   actionTitle: String? = nil, onAction: (() -> Void)? = nil,
+                   symbol: String? = nil) {
         titleLabel.text = title
         messageLabel.text = message
         messageLabel.isHidden = message == nil
@@ -230,6 +242,10 @@ final class MessageView: UIView {
             spinner.stopAnimating()
         }
         spinner.isHidden = !loading
+        symbolView.image = symbol.flatMap {
+            UIImage(systemName: $0, withConfiguration: Self.symbolConfiguration)
+        }
+        symbolView.isHidden = symbolView.image == nil
     }
 
     private func setup() {
@@ -240,6 +256,15 @@ final class MessageView: UIView {
         addSubview(stack)
 
         spinner.hidesWhenStopped = true
+
+        symbolView.contentMode = .scaleAspectFit
+        symbolView.tintColor = .tertiaryLabel
+        symbolView.setContentHuggingPriority(.required, for: .horizontal)
+        symbolView.setContentHuggingPriority(.required, for: .vertical)
+        symbolView.setContentCompressionResistancePriority(.required, for: .horizontal)
+        symbolView.setContentCompressionResistancePriority(.required, for: .vertical)
+        symbolView.isAccessibilityElement = false
+        symbolView.isHidden = true
 
         titleLabel.font = .preferredFont(forTextStyle: .headline)
         titleLabel.adjustsFontForContentSizeCategory = true
@@ -255,18 +280,51 @@ final class MessageView: UIView {
 
         actionButton.addTarget(self, action: #selector(actionTapped), for: .touchUpInside)
 
+        stack.addArrangedSubview(symbolView)
         stack.addArrangedSubview(spinner)
         stack.addArrangedSubview(titleLabel)
         stack.addArrangedSubview(messageLabel)
         stack.addArrangedSubview(actionButton)
 
+        // Reserve two lines for the message so the block's height does not change between a
+        // one-line and a two-line message. Without this the centred block shifts up or down
+        // by half a line depending on how the (screen-specific) message happens to wrap,
+        // which stops the empty states lining up across screens.
+        let messageHeight = messageLabel.heightAnchor.constraint(
+            greaterThanOrEqualToConstant: Self.minimumMessageHeight(for: messageLabel.font))
+        messageHeight.priority = .defaultHigh
+        messageHeightConstraint = messageHeight
+
+        // The stack hugs its text by default, and `WrappingLabel` sets its own
+        // `preferredMaxLayoutWidth` from its bounds, so a centring stack and a self-sizing
+        // label can chase each other into a progressively narrower column: each pass fits the
+        // text to the narrower width it just settled on. Pinning the stack to the full column
+        // and giving the labels that same width keeps the empty state from shrinking.
         NSLayoutConstraint.activate([
+            symbolView.widthAnchor.constraint(equalToConstant: Self.symbolSide),
+            symbolView.heightAnchor.constraint(equalToConstant: Self.symbolSide),
+
+            titleLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            messageLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            messageHeight,
+
             stack.centerXAnchor.constraint(equalTo: centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
             stack.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 24),
-            stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
         ])
+    }
+
+    private static func minimumMessageHeight(for font: UIFont) -> CGFloat {
+        (font.lineHeight * 2).rounded(.up)
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.preferredContentSizeCategory
+                != previousTraitCollection?.preferredContentSizeCategory else { return }
+        messageHeightConstraint?.constant = Self.minimumMessageHeight(for: messageLabel.font)
     }
 
     @objc private func actionTapped() {

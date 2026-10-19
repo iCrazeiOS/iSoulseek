@@ -34,6 +34,8 @@ final class RootViewController: UIViewController {
             guard !(current is MainTabBarController) else { return }
             let main = mainViewController ?? MainTabBarController(client: client)
             mainViewController = main
+            // Every sign-in starts on Search, even when the tab bar was kept from an earlier session.
+            main.resetToSearch()
             swap(to: main)
         } else {
             guard !(current is LoginViewController) else { return }

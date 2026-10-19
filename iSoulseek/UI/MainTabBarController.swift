@@ -32,6 +32,16 @@ final class MainTabBarController: UITabBarController {
         ]
     }
 
+    /// Returns to a clean Search tab. Called on every sign-in so a session never resumes on
+    /// whichever tab (or pushed screen) the previous one left behind.
+    func resetToSearch() {
+        loadViewIfNeeded()
+        selectedIndex = 0
+        viewControllers?
+            .compactMap { $0 as? UINavigationController }
+            .forEach { $0.popToRootViewController(animated: false) }
+    }
+
     private func wrap(_ viewController: UIViewController, title: String, symbol: String) -> UINavigationController {
         viewController.tabBarItem = UITabBarItem(title: title,
                                                  image: UIImage(systemName: symbol),

@@ -134,15 +134,17 @@ final class LoginViewController: UIViewController {
         footnoteLabel.textColor = .tertiaryLabel
         footnoteLabel.textAlignment = .center
 
-        // The spinner and the text are laid out as one centred group, so the text sits
-        // in the middle of the screen on its own and only shifts when the spinner shows.
-        statusStack.axis = .horizontal
+        // The spinner sits above the message and the message spans the whole form column.
+        // A label that hugs its text sits exactly on the width where the text breaks, so a
+        // short message can wrap; giving it the full column keeps it on one line and lets a
+        // long one wrap across the column rather than being squeezed into a narrow block.
+        statusStack.axis = .vertical
         statusStack.spacing = Metrics.statusSpacing
         statusStack.alignment = .center
         statusStack.translatesAutoresizingMaskIntoConstraints = false
         statusStack.addArrangedSubview(spinner)
         statusStack.addArrangedSubview(statusLabel)
-        statusLabel.setContentHuggingPriority(.required, for: .horizontal)
+        statusLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         statusRow.addSubview(statusStack)
@@ -199,6 +201,7 @@ final class LoginViewController: UIViewController {
             columnAvailableConstraint,
 
             spinner.widthAnchor.constraint(equalToConstant: Metrics.indicatorWidth),
+            statusLabel.widthAnchor.constraint(equalTo: statusRow.widthAnchor),
             statusStack.centerXAnchor.constraint(equalTo: statusRow.centerXAnchor),
             statusStack.topAnchor.constraint(equalTo: statusRow.topAnchor),
             statusStack.bottomAnchor.constraint(equalTo: statusRow.bottomAnchor),
