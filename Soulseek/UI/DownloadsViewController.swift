@@ -25,6 +25,9 @@ final class DownloadsViewController: UIViewController {
     private lazy var clearItem = UIBarButtonItem(title: "Clear", style: .plain,
                                                  target: self, action: #selector(clearFinished))
 
+    private lazy var shareGesture = UILongPressGestureRecognizer(target: self,
+                                                                 action: #selector(handleLongPress(_:)))
+
     init(client: SoulseekClient) {
         self.client = client
         super.init(nibName: nil, bundle: nil)
@@ -67,6 +70,7 @@ final class DownloadsViewController: UIViewController {
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 84
         tableView.register(TransferCell.self, forCellReuseIdentifier: TransferCell.reuseIdentifier)
+        tableView.addGestureRecognizer(shareGesture)
 
         messageView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -170,6 +174,19 @@ final class DownloadsViewController: UIViewController {
         previewURL = url
         let controller = QLPreviewController()
         controller.dataSource = self
+        present(controller, animated: true)
+    }
+
+    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        let point = gesture.location(in: tableView)
+        guard let indexPath = tableView.indexPathForRow(at: point), indexPath.row < displayed.count else { return }
+        let transfer = displayed[indexPath.row]
+        guard canPreview(transfer), let url = localURL(for: transfer),
+              FileManager.default.fileExists(atPath: url.path) else { return }
+
+        let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        Theme.configurePopover(controller, in: tableView, rect: tableView.rectForRow(at: indexPath))
         present(controller, animated: true)
     }
 }

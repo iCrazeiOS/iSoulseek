@@ -61,9 +61,9 @@ enum Theme {
         }
     }
 
-    /// Anchors an action sheet so it cannot crash on iPad.
-    static func configurePopover(_ alert: UIAlertController, in view: UIView, rect: CGRect? = nil) {
-        guard let popover = alert.popoverPresentationController else { return }
+    /// Anchors a presented controller's popover so it cannot crash on iPad.
+    static func configurePopover(_ controller: UIViewController, in view: UIView, rect: CGRect? = nil) {
+        guard let popover = controller.popoverPresentationController else { return }
         popover.sourceView = view
         popover.sourceRect = rect ?? CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
         popover.permittedArrowDirections = rect == nil ? [] : .any
