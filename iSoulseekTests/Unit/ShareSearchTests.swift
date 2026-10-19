@@ -90,5 +90,6 @@ final class ModelTests: XCTestCase {
                                   file: ShareFile(name: "Music\\a.mp3", size: 1),
                                   isSlotFree: true, averageSpeed: 0, queueLength: 0)
         XCTAssertEqual(result.fullPath, "Music\\a.mp3")
+        XCTAssertEqual(result.folderPath, "Music")
     }
 }

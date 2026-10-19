@@ -11,6 +11,7 @@ final class BrowseViewController: UIViewController {
 
     private let username: String
     private let client: SoulseekClient
+    private let focusedFolder: String?
 
     private let tableView = UITableView(frame: .zero, style: .plain)
     private let searchBar = UISearchBar()
@@ -23,9 +24,10 @@ final class BrowseViewController: UIViewController {
     private var searchQuery = ""
     private var hasLoaded = false
 
-    init(username: String, client: SoulseekClient) {
+    init(username: String, client: SoulseekClient, focusedFolder: String? = nil) {
         self.username = username
         self.client = client
+        self.focusedFolder = focusedFolder
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -98,6 +100,14 @@ final class BrowseViewController: UIViewController {
             case .success(let folders):
                 self.folders = folders.sorted {
                     $0.path.localizedStandardCompare($1.path) == .orderedAscending
+                }
+                if let focusedFolder = self.focusedFolder,
+                   let index = self.folders.firstIndex(where: {
+                       $0.path.caseInsensitiveCompare(focusedFolder) == .orderedSame
+                   }) {
+                    let folder = self.folders.remove(at: index)
+                    self.folders.insert(folder, at: 0)
+                    self.expandedPath = folder.path
                 }
                 self.hasLoaded = true
                 self.messageView.isHidden = true

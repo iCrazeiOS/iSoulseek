@@ -48,6 +48,11 @@ struct SearchResult: Hashable {
 
     /// Full virtual path, using `\` as the separator.
     var fullPath: String { file.name }
+
+    /// The folder containing the file, using `\` as the separator.
+    var folderPath: String {
+        ShareFolder.components(of: fullPath).dropLast().joined(separator: "\\")
+    }
 }
 
 /// Ordering applied to the results in a search.

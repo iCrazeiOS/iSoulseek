@@ -309,6 +309,11 @@ final class SearchViewController: UIViewController {
         options.allows(item.result)
     }
 
+    private func firstVisibleResult(forKey key: String) -> SearchResult? {
+        guard let section = sectionsByKey[key] else { return nil }
+        return sorted(section.items.filter(passesFilter)).first?.result
+    }
+
     private func sorted(_ items: [Item]) -> [Item] {
         guard options.sortOrder != .arrival else { return items }
         return items.sorted { lhs, rhs in
@@ -442,16 +447,17 @@ final class SearchViewController: UIViewController {
             self?.download(result)
         })
         alert.addAction(UIAlertAction(title: "Browse \(result.username)", style: .default) { [weak self] _ in
-            self?.pushBrowse(username: result.username)
+            self?.pushBrowse(username: result.username, folder: result.folderPath)
         })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         Theme.configurePopover(alert, in: tableView, rect: tableView.rectForRow(at: indexPath))
         present(alert, animated: true)
     }
 
-    private func pushBrowse(username: String) {
+    private func pushBrowse(username: String, folder: String? = nil) {
         guard let navigation = navigationController else { return }
-        navigation.pushViewController(BrowseViewController(username: username, client: client), animated: true)
+        let browse = BrowseViewController(username: username, client: client, focusedFolder: folder)
+        navigation.pushViewController(browse, animated: true)
     }
 
     private func presentAlert(title: String, message: String) {
@@ -471,7 +477,11 @@ extension SearchViewController: UITableViewDelegate {
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: SearchSectionHeader.reuseIdentifier) as? SearchSectionHeader
         header?.configure(username: model.displayName, count: model.items.count)
-        header?.onBrowse = { [weak self] in self?.pushBrowse(username: model.displayName) }
+        header?.onBrowse = { [weak self] in
+            guard let self else { return }
+            let folder = self.firstVisibleResult(forKey: model.displayName.lowercased())?.folderPath
+            self.pushBrowse(username: model.displayName, folder: folder)
+        }
         return header
     }
 
