@@ -1,0 +1,95 @@
+name: Soulseek
+
+options:
+  bundleIdPrefix: org.soulseekkit
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    CLANG_ENABLE_MODULES: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    GCC_WARN_UNDECLARED_SELECTOR: YES
+    CLANG_WARN_DOCUMENTATION_COMMENTS: NO
+    SWIFT_EMIT_LOC_STRINGS: NO
+
+targets:
+  Soulseek:
+    type: application
+    platform: iOS
+    sources:
+      - path: Soulseek
+    dependencies:
+      - sdk: libz.tbd
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.soulseekkit.Soulseek
+        PRODUCT_NAME: Soulseek
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_CFBundleDisplayName: Soulseek
+        ENABLE_TESTABILITY: YES
+    info:
+      path: Soulseek/App/Info.plist
+      properties:
+        CFBundleDisplayName: Soulseek
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default Configuration
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        ITSAppUsesNonExemptEncryption: false
+        NSLocalNetworkUsageDescription: Soulseek connects to peers on your local network for file transfers.
+
+  SoulseekTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: SoulseekTests
+    dependencies:
+      - target: Soulseek
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.soulseekkit.SoulseekTests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_STRICT_CONCURRENCY: minimal
+
+schemes:
+  Soulseek:
+    build:
+      targets:
+        Soulseek: all
+        SoulseekTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - SoulseekTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
