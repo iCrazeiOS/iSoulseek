@@ -2,8 +2,13 @@ import Combine
 import QuickLook
 import UIKit
 
-/// Transfers, split into a "Downloading" tab (active) and a "Completed" tab (finished).
+/// Downloads, split into a "Downloading" tab (active transfers) and a "Completed" tab (files on disk).
 final class DownloadsViewController: UIViewController {
+
+    private enum Item {
+        case transfer(Transfer)
+        case file(DownloadedFile)
+    }
 
     private let client: SoulseekClient
     private var cancellables = Set<AnyCancellable>()
@@ -13,14 +18,25 @@ final class DownloadsViewController: UIViewController {
     private let messageView = MessageView()
 
     private var transfers: [Transfer] = []
-    private var displayed: [Transfer] = []
+    private var completedFiles: [DownloadedFile] = []
+    private var displayed: [Item] = []
     private var reloadScheduled = false
+    private var scanScheduled = false
+    private var scanGeneration = 0
     private var previewURL: URL?
+    private var sortOrder: DownloadSortOrder = .newest
 
     private var showsCompleted: Bool {
         get { tabControl.selectedSegmentIndex == 1 }
         set { tabControl.selectedSegmentIndex = newValue ? 1 : 0 }
     }
+
+    private lazy var sortItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(image: UIImage(systemName: "arrow.up.arrow.down"),
+                                   style: .plain, target: nil, action: nil)
+        item.accessibilityLabel = "Sort completed downloads"
+        return item
+    }()
 
     private lazy var deleteItem: UIBarButtonItem = {
         let item = UIBarButtonItem(image: UIImage(systemName: "trash.fill"), style: .plain,
@@ -46,16 +62,25 @@ final class DownloadsViewController: UIViewController {
         super.viewDidLoad()
         title = "Downloads"
         view.backgroundColor = .systemBackground
+        sortOrder = client.store.downloadSortOrder
         navigationItem.rightBarButtonItem = deleteItem
 
         configureLayout()
-        transfers = client.transfers()
+        updateSortItem()
+        updateNavigation()
+        transfers = client.transfers().filter { $0.state.isActive }
         rebuild()
 
         client.transferChanges
             .receive(on: DispatchQueue.main)
             .sink { [weak self] transfer in self?.merge(transfer) }
             .store(in: &cancellables)
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        updateNavigation()
+        reloadCompletedFiles()
     }
 
     private func configureLayout() {
@@ -68,7 +93,7 @@ final class DownloadsViewController: UIViewController {
         tableView.delegate = self
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 84
-        tableView.register(TransferCell.self, forCellReuseIdentifier: TransferCell.reuseIdentifier)
+        tableView.register(DownloadCell.self, forCellReuseIdentifier: DownloadCell.reuseIdentifier)
         tableView.addGestureRecognizer(shareGesture)
 
         messageView.translatesAutoresizingMaskIntoConstraints = false
@@ -95,15 +120,39 @@ final class DownloadsViewController: UIViewController {
         ])
     }
 
+    private func updateNavigation() {
+        navigationItem.leftBarButtonItem = showsCompleted ? sortItem : nil
+    }
+
+    private func updateSortItem() {
+        sortItem.menu = UIMenu(children: DownloadSortOrder.allCases.map { order in
+            UIAction(title: order.displayName, state: sortOrder == order ? .on : .off) { [weak self] _ in
+                guard let self else { return }
+                self.sortOrder = order
+                self.client.store.downloadSortOrder = order
+                self.updateSortItem()
+                self.rebuild()
+            }
+        })
+    }
+
     // MARK: Updates
 
     private func merge(_ transfer: Transfer) {
-        if let index = transfers.firstIndex(where: { $0.id == transfer.id }) {
-            transfers[index] = transfer
+        if transfer.state.isActive {
+            if let index = transfers.firstIndex(where: { $0.id == transfer.id }) {
+                transfers[index] = transfer
+            } else {
+                transfers.append(transfer)
+            }
         } else {
-            transfers.append(transfer)
+            transfers.removeAll { $0.id == transfer.id }
         }
+
         scheduleReload()
+        if !transfer.isUpload && !transfer.state.isActive {
+            scheduleCompletedFilesReload()
+        }
     }
 
     private func scheduleReload() {
@@ -115,17 +164,52 @@ final class DownloadsViewController: UIViewController {
         }
     }
 
+    private func scheduleCompletedFilesReload() {
+        guard !scanScheduled else { return }
+        scanScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.scanScheduled = false
+            self?.reloadCompletedFiles()
+        }
+    }
+
+    private func reloadCompletedFiles() {
+        scanGeneration += 1
+        let generation = scanGeneration
+        let root = client.store.downloadsDirectory
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let files = DownloadedFiles.scan(in: root)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.scanGeneration == generation else { return }
+                self.completedFiles = files
+                self.rebuild()
+            }
+        }
+    }
+
     private func rebuild() {
         let active = transfers.filter { $0.state.isActive }
-        let finished = Array(transfers.filter { !$0.state.isActive }.reversed())
-        displayed = showsCompleted ? finished : active
+        let completed = visibleCompletedFiles(active: active)
+        displayed = showsCompleted
+            ? sortOrder.sorted(completed).map(Item.file)
+            : active.map(Item.transfer)
 
         let activeCount = active.count
         tabControl.setTitle(activeCount > 0 ? "Downloading (\(activeCount))" : "Downloading", forSegmentAt: 0)
-        tabControl.setTitle(finished.isEmpty ? "Completed" : "Completed (\(finished.count))", forSegmentAt: 1)
+        tabControl.setTitle(completed.isEmpty ? "Completed" : "Completed (\(completed.count))", forSegmentAt: 1)
 
         tableView.reloadData()
         updateEmptyState()
+    }
+
+    /// Files still being downloaded are not completed, even though a partial file exists on disk.
+    private func visibleCompletedFiles(active: [Transfer]) -> [DownloadedFile] {
+        let activePaths = Set(active.filter { !$0.isUpload }.compactMap { transfer in
+            PathSanitizer.destination(in: client.store.downloadsDirectory,
+                                      virtualPath: transfer.filename)?.standardizedFileURL.path
+        })
+        return completedFiles.filter { !activePaths.contains($0.url.standardizedFileURL.path) }
     }
 
     private func updateEmptyState() {
@@ -135,8 +219,8 @@ final class DownloadsViewController: UIViewController {
         }
         messageView.isHidden = false
         if showsCompleted {
-            messageView.configure(title: "No completed transfers",
-                                 message: "Finished downloads and uploads appear here.")
+            messageView.configure(title: "No completed downloads",
+                                 message: "Files in your Downloads folder appear here.")
         } else {
             messageView.configure(title: "No active transfers",
                                  message: "Files you download appear here, along with anything other users take from your share.")
@@ -144,7 +228,9 @@ final class DownloadsViewController: UIViewController {
     }
 
     @objc private func tabChanged() {
+        updateNavigation()
         rebuild()
+        if showsCompleted { reloadCompletedFiles() }
     }
 
     @objc private func confirmDeleteAllDownloads() {
@@ -162,28 +248,23 @@ final class DownloadsViewController: UIViewController {
     }
 
     private func deleteAllDownloads() {
-        client.deleteAllDownloads()
-        transfers = client.transfers()
+        scanGeneration += 1
+        completedFiles.removeAll()
+        client.deleteAllDownloads { [weak self] in
+            self?.reloadCompletedFiles()
+        }
+        transfers = client.transfers().filter { $0.state.isActive }
         rebuild()
     }
 
     // MARK: Completed downloads
 
-    /// Where a download's bytes live on disk, mirroring the transfer manager's sanitisation.
-    private func localURL(for transfer: Transfer) -> URL? {
-        PathSanitizer.destination(in: client.store.downloadsDirectory, virtualPath: transfer.filename)
-    }
-
-    private func canPreview(_ transfer: Transfer) -> Bool {
-        showsCompleted && !transfer.isUpload && transfer.state == .completed
-    }
-
-    private func presentPreview(for transfer: Transfer) {
-        guard let url = localURL(for: transfer), FileManager.default.fileExists(atPath: url.path) else {
+    private func presentPreview(for file: DownloadedFile) {
+        guard FileManager.default.fileExists(atPath: file.url.path) else {
             Theme.showToast("This file is no longer on the device", in: view)
             return
         }
-        previewURL = url
+        previewURL = file.url
         let controller = QLPreviewController()
         controller.dataSource = self
         present(controller, animated: true)
@@ -192,12 +273,12 @@ final class DownloadsViewController: UIViewController {
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began else { return }
         let point = gesture.location(in: tableView)
-        guard let indexPath = tableView.indexPathForRow(at: point), indexPath.row < displayed.count else { return }
-        let transfer = displayed[indexPath.row]
-        guard canPreview(transfer), let url = localURL(for: transfer),
-              FileManager.default.fileExists(atPath: url.path) else { return }
+        guard let indexPath = tableView.indexPathForRow(at: point),
+              displayed.indices.contains(indexPath.row),
+              case .file(let file) = displayed[indexPath.row],
+              FileManager.default.fileExists(atPath: file.url.path) else { return }
 
-        let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        let controller = UIActivityViewController(activityItems: [file.url], applicationActivities: nil)
         Theme.configurePopover(controller, in: tableView, rect: tableView.rectForRow(at: indexPath))
         present(controller, animated: true)
     }
@@ -212,9 +293,13 @@ extension DownloadsViewController: UITableViewDataSource {
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: TransferCell.reuseIdentifier, for: indexPath)
-        let transfer = displayed[indexPath.row]
-        (cell as? TransferCell)?.configure(with: transfer, showsChevron: canPreview(transfer))
+        let cell = tableView.dequeueReusableCell(withIdentifier: DownloadCell.reuseIdentifier, for: indexPath)
+        switch displayed[indexPath.row] {
+        case .transfer(let transfer):
+            (cell as? DownloadCell)?.configure(with: transfer)
+        case .file(let file):
+            (cell as? DownloadCell)?.configure(with: file, showsChevron: true)
+        }
         return cell
     }
 }
@@ -225,35 +310,32 @@ extension DownloadsViewController: UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        let transfer = displayed[indexPath.row]
-        guard canPreview(transfer) else { return }
-        presentPreview(for: transfer)
+        guard case .file(let file) = displayed[indexPath.row] else { return }
+        presentPreview(for: file)
     }
 
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath)
     -> UISwipeActionsConfiguration? {
-        let transfer = displayed[indexPath.row]
-
-        if transfer.state.isActive {
+        switch displayed[indexPath.row] {
+        case .transfer(let transfer):
             let action = UIContextualAction(style: .destructive, title: "Cancel") { [weak self] _, _, completion in
                 self?.client.cancelTransfer(id: transfer.id)
                 completion(true)
             }
             return UISwipeActionsConfiguration(actions: [action])
-        }
 
-        // Deleting a finished download removes the file from disk; other finished rows just go away.
-        let deletesFile = !transfer.isUpload && transfer.state == .completed
-        let title = deletesFile ? "Delete" : "Remove"
-        let action = UIContextualAction(style: .destructive, title: title) { [weak self] _, _, completion in
-            guard let self else { completion(false); return }
-            self.client.deleteTransfer(id: transfer.id, deleteFile: deletesFile)
-            self.transfers = self.client.transfers()
-            self.rebuild()
-            if deletesFile { Theme.showToast("Deleted \(transfer.localFilename)", in: self.view) }
-            completion(true)
+        case .file(let file):
+            let action = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, completion in
+                guard let self else { completion(false); return }
+                DownloadedFiles.delete(file.url, upTo: self.client.store.downloadsDirectory)
+                self.completedFiles.removeAll { $0.url == file.url }
+                self.rebuild()
+                self.reloadCompletedFiles()
+                Theme.showToast("Deleted \(file.name)", in: self.view)
+                completion(true)
+            }
+            return UISwipeActionsConfiguration(actions: [action])
         }
-        return UISwipeActionsConfiguration(actions: [action])
     }
 }
 
@@ -270,11 +352,11 @@ extension DownloadsViewController: QLPreviewControllerDataSource {
     }
 }
 
-// MARK: - TransferCell
+// MARK: - DownloadCell
 
-private final class TransferCell: UITableViewCell {
+private final class DownloadCell: UITableViewCell {
 
-    static let reuseIdentifier = "TransferCell"
+    static let reuseIdentifier = "DownloadCell"
 
     private let directionLabel = UILabel()
     private let nameLabel = UILabel()
@@ -297,6 +379,7 @@ private final class TransferCell: UITableViewCell {
         directionLabel.textColor = transfer.isUpload ? .systemOrange : .systemBlue
         nameLabel.text = transfer.localFilename
         statusLabel.text = "\(transfer.username) · \(transfer.state.description)"
+        statusLabel.lineBreakMode = .byTruncatingTail
         accessoryType = showsChevron ? .disclosureIndicator : .none
 
         progressView.isHidden = !transfer.state.isActive
@@ -310,6 +393,17 @@ private final class TransferCell: UITableViewCell {
         } else {
             detailLabel.text = Formatters.bytes(transfer.size)
         }
+    }
+
+    func configure(with file: DownloadedFile, showsChevron: Bool = false) {
+        directionLabel.text = Theme.mediaSymbol(forExtension: file.url.pathExtension) ?? "doc"
+        directionLabel.textColor = .secondaryLabel
+        nameLabel.text = file.name
+        statusLabel.text = file.folder
+        statusLabel.lineBreakMode = .byTruncatingMiddle
+        accessoryType = showsChevron ? .disclosureIndicator : .none
+        progressView.isHidden = true
+        detailLabel.text = "\(Formatters.bytes(file.size)) · \(file.modified.formatted(date: .abbreviated, time: .shortened))"
     }
 
     private func setup() {

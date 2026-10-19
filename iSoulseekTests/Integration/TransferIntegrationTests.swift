@@ -46,6 +46,8 @@ final class TransferIntegrationTests: XCTestCase {
             (try? Data(contentsOf: destination))?.count == payload.count
         }
         XCTAssertEqual((try? Data(contentsOf: destination)), payload)
+        XCTAssertTrue(env.client.transfers().isEmpty,
+                      "completed downloads belong to the filesystem, not the transfer list")
     }
 
     func testDownloadResumesFromExistingBytes() {
@@ -127,15 +129,10 @@ final class TransferIntegrationTests: XCTestCase {
         let destination = env.downloadsDirectory.appendingPathComponent("Music/Album/deleteme.bin")
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
 
-        guard let id = transfers.last(where: { !$0.isUpload && $0.state == .completed })?.id else {
-            return XCTFail("no completed download to delete")
-        }
-        env.client.deleteTransfer(id: id, deleteFile: true)
+        DownloadedFiles.delete(destination, upTo: env.downloadsDirectory)
 
-        assertEventually("file was not deleted", timeout: 3) {
-            !FileManager.default.fileExists(atPath: destination.path)
-        }
-        XCTAssertTrue(env.client.transfers().allSatisfy { $0.id != id })
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertTrue(env.client.transfers().isEmpty)
         assertEventually("empty folders were not cleaned up", timeout: 3) {
             !FileManager.default.fileExists(atPath: env.downloadsDirectory.appendingPathComponent("Music").path)
         }
@@ -169,27 +166,16 @@ final class TransferIntegrationTests: XCTestCase {
         let album = env.downloadsDirectory.appendingPathComponent("Artist/Album")
         let artist = env.downloadsDirectory.appendingPathComponent("Artist")
 
-        guard let firstID = transfers.first(where: { $0.filename == firstFilename })?.id,
-              let secondID = transfers.first(where: { $0.filename == secondFilename })?.id else {
-            return XCTFail("downloads were not recorded")
-        }
-
-        env.client.deleteTransfer(id: firstID, deleteFile: true)
-        assertEventually("first file was not deleted", timeout: 3) {
-            !FileManager.default.fileExists(atPath: first.path)
-        }
+        DownloadedFiles.delete(first, upTo: env.downloadsDirectory)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: album.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: artist.path))
 
-        env.client.deleteTransfer(id: secondID, deleteFile: true)
-        assertEventually("last file was not deleted", timeout: 3) {
-            !FileManager.default.fileExists(atPath: second.path)
-        }
-        assertEventually("empty folders were not cleaned up", timeout: 3) {
-            !FileManager.default.fileExists(atPath: album.path)
-                && !FileManager.default.fileExists(atPath: artist.path)
-        }
+        DownloadedFiles.delete(second, upTo: env.downloadsDirectory)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: second.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: album.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: artist.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: env.downloadsDirectory.path),
                       "the downloads root must be kept")
     }
@@ -227,7 +213,7 @@ final class TransferIntegrationTests: XCTestCase {
             !FileManager.default.fileExists(atPath: first.path)
                 && !FileManager.default.fileExists(atPath: second.path)
         }
-        XCTAssertTrue(env.client.transfers().allSatisfy { $0.isUpload })
+        XCTAssertTrue(env.client.transfers().isEmpty)
         assertEventually("empty folders were not cleaned up", timeout: 3) {
             !FileManager.default.fileExists(atPath: env.downloadsDirectory.appendingPathComponent("Music").path)
         }

@@ -185,13 +185,13 @@ final class SoulseekClient {
     }
 
     /// Deletes every download, including files already on disk and downloads in progress.
-    func deleteAllDownloads() {
-        queue.async { self.transferManager.deleteAllDownloads() }
-    }
-
-    /// Removes a finished transfer; a completed download's file is deleted when `deleteFile` is set.
-    func deleteTransfer(id: UInt32, deleteFile: Bool) {
-        queue.async { self.transferManager.remove(id: id, deleteFile: deleteFile) }
+    func deleteAllDownloads(completion: (() -> Void)? = nil) {
+        queue.async {
+            self.transferManager.deleteAllDownloads {
+                guard let completion else { return }
+                DispatchQueue.main.async(execute: completion)
+            }
+        }
     }
 
     func transfers() -> [Transfer] {

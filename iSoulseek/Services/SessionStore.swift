@@ -11,6 +11,7 @@ final class SessionStore {
         static let status = "status"
         static let searchOnlyFreeSlots = "searchOnlyFreeSlots"
         static let searchSortOrder = "searchSortOrder"
+        static let downloadSortOrder = "downloadSortOrder"
     }
 
     static let defaultServerHost = "server.slsknet.org"
@@ -69,6 +70,14 @@ final class SessionStore {
             defaults.set(newValue.onlyFreeSlots, forKey: Key.searchOnlyFreeSlots)
             defaults.set(newValue.sortOrder.rawValue, forKey: Key.searchSortOrder)
         }
+    }
+
+    var downloadSortOrder: DownloadSortOrder {
+        get {
+            guard defaults.object(forKey: Key.downloadSortOrder) != nil else { return .newest }
+            return DownloadSortOrder(rawValue: defaults.integer(forKey: Key.downloadSortOrder)) ?? .newest
+        }
+        set { defaults.set(newValue.rawValue, forKey: Key.downloadSortOrder) }
     }
 
     var isConfigured: Bool { !username.isEmpty && !password.isEmpty }

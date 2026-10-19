@@ -124,7 +124,10 @@ final class TransferManager {
         transfers.append(transfer)
         onUpdate?(transfer)
 
-        guard transfer.state != .completed else { return transfer }
+        guard transfer.state != .completed else {
+            discardDownload(id)
+            return transfer
+        }
 
         downloads[id] = download
         downloadsByKey[key] = id
@@ -132,9 +135,8 @@ final class TransferManager {
         sessionProvider?(username) { [weak self] session in
             guard let self, var current = self.downloads[id] else { return }
             guard let session else {
-                self.updateTransfer(id) { transfer in
-                    transfer.state = .failed("Could not connect to \(username)")
-                }
+                self.failDownload(username: username, filename: filename,
+                                  reason: "Could not connect to \(username)")
                 return
             }
             if current.isStarted { return }
@@ -154,6 +156,7 @@ final class TransferManager {
             downloadConnections.removeValue(forKey: id)?.cancel()
             openHandles.removeValue(forKey: id)?.closeFile()
             updateTransfer(id) { $0.state = .cancelled }
+            discardDownload(id)
             return
         }
         if let upload = uploads.removeValue(forKey: id) {
@@ -170,20 +173,22 @@ final class TransferManager {
     }
 
     /// Removes every download and empties the downloads directory, including partial files.
-    func deleteAllDownloads() {
+    func deleteAllDownloads(completion: (() -> Void)? = nil) {
         let usernames = Set(downloads.values.map { $0.username })
+        let connections = Array(downloadConnections.values)
+        let handles = Array(openHandles.values)
 
         for download in downloads.values {
             download.timeout?.cancel()
-            downloadConnections.removeValue(forKey: download.id)?.cancel()
         }
-        let handles = Array(openHandles.values)
-        openHandles.removeAll()
         downloads.removeAll()
         downloadsByKey.removeAll()
         peerTokenToDownload.removeAll()
+        downloadConnections.removeAll()
+        openHandles.removeAll()
         progressMarks.removeAll()
         transfers.removeAll { !$0.isUpload }
+        for connection in connections { connection.cancel() }
 
         for username in usernames where !hasPendingWork(username: username) {
             onUserWorkFinished?(username)
@@ -197,29 +202,10 @@ final class TransferManager {
             for url in contents {
                 try? FileManager.default.removeItem(at: url)
             }
+            if let completion {
+                self.queue.async { completion() }
+            }
         }
-    }
-
-    /// Removes one finished transfer. A completed download's file is deleted when `deleteFile` is set;
-    /// partial files from failed or cancelled downloads are kept so a future attempt can resume.
-    @discardableResult
-    func remove(id: UInt32, deleteFile: Bool) -> Bool {
-        guard let index = transfers.firstIndex(where: { $0.id == id }) else { return false }
-        let transfer = transfers[index]
-        guard !transfer.state.isActive else { return false }
-        transfers.remove(at: index)
-
-        guard deleteFile, !transfer.isUpload, transfer.state == .completed,
-              let url = PathSanitizer.destination(in: downloadsDirectory,
-                                                  virtualPath: transfer.filename) else {
-            return true
-        }
-        let root = downloadsDirectory.standardizedFileURL
-        ioQueue.async {
-            try? FileManager.default.removeItem(at: url)
-            Self.removeEmptyParents(of: url, upTo: root)
-        }
-        return true
     }
 
     func reset() {
@@ -665,6 +651,7 @@ final class TransferManager {
         downloadConnections.removeValue(forKey: id)?.cancel()
         openHandles.removeValue(forKey: id)?.closeFile()
         updateTransfer(id) { $0.state = .completed }
+        discardDownload(id)
         if !hasPendingWork(username: download.username) {
             onUserWorkFinished?(download.username)
         }
@@ -705,6 +692,7 @@ final class TransferManager {
         downloadConnections.removeValue(forKey: id)?.cancel()
         openHandles.removeValue(forKey: id)?.closeFile()
         updateTransfer(id) { $0.state = .failed(reason.isEmpty ? "Refused" : reason) }
+        discardDownload(id)
         if !hasPendingWork(username: username) {
             onUserWorkFinished?(username)
         }
@@ -745,6 +733,13 @@ final class TransferManager {
 
     // MARK: Helpers
 
+    /// Drops a finished download from the in-memory list; the filesystem owns the completed state.
+    private func discardDownload(_ id: UInt32) {
+        transfers.removeAll { $0.id == id }
+        progressMarks.removeValue(forKey: id)
+        peerTokenToDownload = peerTokenToDownload.filter { $0.value != id }
+    }
+
     private func allocateToken() -> UInt32 {
         nextToken &+= 1
         if nextToken == 0 { nextToken = 1 }
@@ -773,17 +768,6 @@ final class TransferManager {
             return nil
         }
         return size.uint64Value
-    }
-
-    /// Deletes now-empty directories left behind after a file is removed, without touching the root.
-    private static func removeEmptyParents(of url: URL, upTo root: URL) {
-        var directory = url.deletingLastPathComponent().standardizedFileURL
-        while directory.path.hasPrefix(root.path), directory.path != root.path {
-            let contents = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
-            guard contents.isEmpty else { return }
-            try? FileManager.default.removeItem(at: directory)
-            directory = directory.deletingLastPathComponent().standardizedFileURL
-        }
     }
 
     private static func key(username: String, filename: String) -> String {
