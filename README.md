@@ -35,6 +35,26 @@ xcodebuild -project Soulseek.xcodeproj -scheme Soulseek \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
+This runs 130+ unit and integration tests, including an in-process mock Soulseek server and peer
+that speak the real wire protocol. The two live tests are skipped unless you opt in:
+
+```sh
+# Unit test bundle
+SOULSEEK_LIVE=1 SOULSEEK_LIVE_USER=<user> SOULSEEK_LIVE_PASS=<pass> \
+  xcodebuild -project Soulseek.xcodeproj -scheme Soulseek \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:SoulseekTests test
+
+# UI flow test (xcodebuild only forwards TEST_RUNNER_-prefixed variables to a UI test runner)
+TEST_RUNNER_SOULSEEK_LIVE=1 \
+TEST_RUNNER_SOULSEEK_LIVE_USER=<user> TEST_RUNNER_SOULSEEK_LIVE_PASS=<pass> \
+  xcodebuild -project Soulseek.xcodeproj -scheme Soulseek \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:SoulseekUITests test
+```
+
+The live tests sign in to `server.slsknet.org`, run one search, and (in the UI test) drive the whole
+app: sign in, search, check the tabs. Use a throwaway account — signing in with an unused name
+registers it.
+
 `Soulseek.xcodeproj` is generated and therefore not committed; `project.yml` is the source of truth.
 
 ## Using the app
@@ -79,6 +99,7 @@ Soulseek/
   Services/    SoulseekClient, TransferManager, PeerSession, ShareIndex, SessionStore, Keychain
   UI/          Root, Login, Search, Browse, Downloads, Settings
 SoulseekTests/ unit tests and an in-process mock server
+SoulseekUITests/ opt-in UI flow test that drives the app against the real network
 docs/PROTOCOL.md  condensed wire-format reference
 PLAN.md           design notes, phases and the security checklist
 ```

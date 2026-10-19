@@ -74,12 +74,26 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_STRICT_CONCURRENCY: minimal
 
+  SoulseekUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: SoulseekUITests
+    dependencies:
+      - target: Soulseek
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.soulseekkit.SoulseekUITests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_STRICT_CONCURRENCY: minimal
+
 schemes:
   Soulseek:
     build:
       targets:
         Soulseek: all
         SoulseekTests: [test]
+        SoulseekUITests: [test]
     run:
       config: Debug
     test:
@@ -87,6 +101,7 @@ schemes:
       gatherCoverageData: true
       targets:
         - SoulseekTests
+        - SoulseekUITests
     profile:
       config: Release
     analyze:

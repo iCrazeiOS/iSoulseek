@@ -49,6 +49,8 @@ final class MockPeer {
     private var recordedSearchTokens: [UInt32] = []
     private var recordedPierceTokens: [UInt32] = []
     private var recordedUserInfoResponses = 0
+    private var _unsolicitedOffsetBytes = 0
+    private var _unsolicitedClosed = false
 
     // MARK: Lifecycle
 
@@ -136,6 +138,37 @@ final class MockPeer {
             channel.start()
         }
     }
+
+    /// Dials the client with a file-transfer connection carrying a token the client never issued.
+    func sendUnsolicitedFileTransfer(token: UInt32) {
+        queue.async { [weak self] in
+            guard let self, let port = self.clientPort() else { return }
+            let channel = self.dial(port: port, label: "peer-file-unsolicited")
+            channel.onRaw = { [weak self] data in
+                self?.queue.async { self?._unsolicitedOffsetBytes += data.count }
+            }
+            channel.onClosed = { [weak self] _ in
+                self?.queue.async { self?._unsolicitedClosed = true }
+            }
+            channel.onReady = { [weak self, weak channel] in
+                guard let self, let channel else { return }
+                var payload = MockWriter()
+                payload.string(self.username)
+                payload.string("F")
+                payload.u32(0)
+                channel.send(initCode: 1, payload: payload.data)
+                channel.setMode(.raw)
+                var tokenWriter = MockWriter()
+                tokenWriter.u32(token)
+                channel.sendRaw(tokenWriter.data)
+            }
+            channel.start()
+        }
+    }
+
+    /// Bytes the client replied with on an unsolicited file connection (it should send none).
+    var unsolicitedOffsetBytes: Int { queue.sync { _unsolicitedOffsetBytes } }
+    var unsolicitedFileConnectionClosed: Bool { queue.sync { _unsolicitedClosed } }
 
     /// Dials the client and asks it to upload `virtualPath` to us.
     func requestUpload(virtualPath: String) {        queue.async { [weak self] in

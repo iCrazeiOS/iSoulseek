@@ -34,6 +34,7 @@ final class SoulseekClient {
     static let peerConnectTimeout: TimeInterval = 15
     static let addressTimeout: TimeInterval = 10
     static let browseTimeout: TimeInterval = 60
+    static let handshakeTimeout: TimeInterval = 20
     static let maximumPeerSessions = 32
     static let maximumQueryLength = 200
 
@@ -362,13 +363,18 @@ final class SoulseekClient {
     // MARK: Inbound connections
 
     private func handleInbound(_ connection: SocketConnection) {
-        connection.onFrame = { [weak self] frame in
-            guard let self else { return }
+        // A connection that never completes its peer-init handshake must not be held open forever.
+        let handshake = DispatchWorkItem { [weak connection] in connection?.cancel() }
+        queue.asyncAfter(deadline: .now() + Self.handshakeTimeout, execute: handshake)
+
+        connection.onFrame = { [weak self, weak connection] frame in
+            guard let self, let connection else { return }
             guard case .initMessage(let code, let payload) = frame else { return }
             guard let message = try? InitMessage.decode(code: code, payload: payload) else {
                 connection.cancel()
                 return
             }
+            handshake.cancel()
             switch message {
             case .peerInit(let username, let type, _):
                 self.handleInboundPeerInit(connection: connection, username: username, type: type)

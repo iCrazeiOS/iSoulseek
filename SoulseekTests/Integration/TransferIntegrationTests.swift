@@ -133,4 +133,19 @@ final class TransferIntegrationTests: XCTestCase {
         XCTAssertEqual(env.peer.uploadDenied.first?.filename, "Shared\\not-shared.mp3")
         XCTAssertEqual(env.peer.uploadDenied.first?.reason, "File not shared.")
     }
+
+    /// An inbound file connection whose token we never issued must be refused, not served.
+    func testInboundFileConnectionWithUnknownTokenIsRefused() {
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        env.peer.sendUnsolicitedFileTransfer(token: 0xDEAD_BEEF)
+
+        assertEventually("the client kept an unsolicited file connection open", timeout: 5) {
+            env.peer.unsolicitedFileConnectionClosed
+        }
+        XCTAssertEqual(env.peer.unsolicitedOffsetBytes, 0,
+                       "the client must not answer an unknown transfer token")
+        let written = (try? FileManager.default.contentsOfDirectory(atPath: env.downloadsDirectory.path)) ?? []
+        XCTAssertEqual(written, [], "nothing should have been written to disk")
+    }
 }

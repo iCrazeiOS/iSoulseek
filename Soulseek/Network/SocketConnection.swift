@@ -35,6 +35,8 @@ final class SocketConnection {
     private var decoder: FrameDecoder
     private var hasReportedClose = false
     private var connectTimeoutWorkItem: DispatchWorkItem?
+    /// Holds the connection open until it finishes, so callers do not have to own it.
+    private var selfReference: SocketConnection?
 
     var isReady: Bool { state == .ready }
     var isFinished: Bool { state.isFinished }
@@ -68,6 +70,7 @@ final class SocketConnection {
     }
 
     func start(connectTimeout: TimeInterval = 15) {
+        selfReference = self
         connection.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
@@ -146,6 +149,10 @@ final class SocketConnection {
         connection.cancel()
         state = reason == nil ? .cancelled : .failed(reason ?? "")
         onClosed?(reason)
+        // Drop the self-reference once this call has returned, so the object can be released.
+        queue.async { [weak self] in
+            self?.selfReference = nil
+        }
     }
 
     private func receive() {

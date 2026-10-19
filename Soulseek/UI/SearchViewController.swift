@@ -416,6 +416,7 @@ private final class SearchResultCell: UITableViewCell {
         folderLabel.text = folderText(for: result)
         metaLabel.text = metaText(for: result)
         configureBadge(for: result)
+        accessibilityIdentifier = "search.result"
     }
 
     private func folderText(for result: SearchResult) -> String {
