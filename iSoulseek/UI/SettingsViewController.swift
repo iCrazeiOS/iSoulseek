@@ -118,7 +118,7 @@ final class SettingsViewController: UIViewController {
 
         let account = [
             Item(title: "Username", value: store.username.isEmpty ? "—" : store.username),
-            Item(title: "Sign out", isDestructive: true, action: { [weak self] in self?.client.disconnect() }),
+            Item(title: "Sign out", isDestructive: true, action: { [weak self] in self?.client.signOut() }),
         ]
 
         let search = [

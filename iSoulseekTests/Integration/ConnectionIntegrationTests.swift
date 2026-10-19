@@ -72,6 +72,41 @@ final class ConnectionIntegrationTests: XCTestCase {
         }
     }
 
+    /// A stored session is used automatically, so the launch screen goes straight to the tabs
+    /// without making the user sign in again.
+    func testRootAutomaticallyConnectsStoredSession() {
+        let root = RootViewController(client: env.client)
+        root.loadViewIfNeeded()
+
+        XCTAssertFalse(root.children.contains { $0 is LoginViewController },
+                       "the login form was shown for a stored session")
+        XCTAssertTrue(waitUntil(5) { env.client.stateChanges.value.isLoggedIn },
+                      "the stored session did not connect")
+        XCTAssertTrue(waitUntil(1) { root.children.contains { $0 is MainTabBarController } },
+                      "the main tab bar was not shown after signing in")
+    }
+
+    /// A full server is a temporary condition, not a reason to send the user back to the login
+    /// form and make them retype credentials that are still valid.
+    func testServerFullKeepsTheSessionRetryable() {
+        env.server.loginOutcome = .reject(reason: "SVRFULL", detail: "")
+
+        env.client.connect()
+
+        assertEventually("a full server was treated as a credential failure") {
+            env.client.stateChanges.value == .disconnected
+        }
+    }
+
+    /// Signing out is final: the next launch must not silently reconnect the old account.
+    func testSignOutForgetsTheStoredPassword() {
+        XCTAssertFalse(env.store.password.isEmpty)
+
+        env.client.signOut()
+
+        XCTAssertTrue(env.store.password.isEmpty)
+    }
+
     /// The server ignores any session that sends something other than Login first, so the client
     /// must not announce shares or ports before it is authenticated.
     func testLoginIsTheFirstMessageSent() {

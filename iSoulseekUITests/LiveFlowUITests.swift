@@ -52,12 +52,11 @@ final class LiveFlowUITests: XCTestCase {
     }
 
     private func signInIfNeeded(username: String, password: String) {
-        if app.tabBars.buttons["Search"].waitForExistence(timeout: 5) {
-            return // A previous run left the account signed in.
-        }
-
         let usernameField = app.textFields["login.username"]
-        XCTAssertTrue(usernameField.waitForExistence(timeout: 10), "no username field")
+        // Stored credentials sign in automatically, so the form may never appear. If it does,
+        // fill it in; otherwise the caller waits for the tabs while the session connects.
+        guard usernameField.waitForExistence(timeout: 5) else { return }
+
         clear(usernameField)
         usernameField.tap()
         usernameField.typeText(username)

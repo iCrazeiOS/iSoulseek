@@ -69,7 +69,8 @@ registers it.
 
 1. Sign in with a Soulseek username and password. A username that does not exist yet is registered
    automatically — there is no password reset, so keep the credentials safe. They are stored in the
-   Keychain (`WhenUnlockedThisDeviceOnly`).
+   Keychain (`WhenUnlockedThisDeviceOnly`) and used to sign in automatically from then on; the
+   login form only returns if the server rejects them or you sign out.
 2. **Search** — global search across the network. Results arrive as peers reply and are grouped by
    user; a result with a free slot will start downloading immediately, queued ones may wait a while.
 3. **Browse** — tap *Browse* on a result's section header, or the browse-user button in the search

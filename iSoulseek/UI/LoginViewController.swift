@@ -65,8 +65,9 @@ final class LoginViewController: UIViewController {
         tap.cancelsTouchesInView = false
         view.addGestureRecognizer(tap)
 
+        // The username is remembered for convenience; the password stays in the Keychain for
+        // automatic sign-in and is not put into the form again.
         usernameField.text = client.store.username
-        passwordField.text = client.store.password
         update(state: client.stateChanges.value)
     }
 
@@ -128,7 +129,7 @@ final class LoginViewController: UIViewController {
         statusLabel.textColor = .secondaryLabel
         statusLabel.textAlignment = .center
 
-        footnoteLabel.text = "New usernames are created automatically. Passwords cannot be reset."
+        footnoteLabel.text = "New usernames are created automatically\nPasswords cannot be reset"
         footnoteLabel.font = .preferredFont(forTextStyle: .footnote)
         footnoteLabel.adjustsFontForContentSizeCategory = true
         footnoteLabel.textColor = .tertiaryLabel

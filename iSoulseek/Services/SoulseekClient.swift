@@ -96,6 +96,13 @@ final class SoulseekClient {
         queue.async { self.disconnectLocked(reason: nil) }
     }
 
+    /// Signs out for good: the saved password is removed so the next launch starts at the login
+    /// form instead of reconnecting the account the user just left.
+    func signOut() {
+        store.password = ""
+        disconnect()
+    }
+
     func setStatus(_ status: UserStatus) {
         store.status = status
         queue.async { self.send(.setStatus(status)) }
@@ -280,10 +287,20 @@ final class SoulseekClient {
         case .login(let result):
             guard result.isSuccess else {
                 let reason = Self.describe(rejection: result.rejectionReason, detail: result.rejectionDetail)
-                setState(.failed(reason))
-                publish { self.messages.send(reason) }
-                server?.cancel()
+                // A full or temporarily unavailable server will accept the same credentials
+                // later, so keep those credentials and let the app retry. Everything else means
+                // the login form is the only way forward.
+                if Self.isRetryable(rejection: result.rejectionReason) {
+                    setState(.disconnected)
+                } else {
+                    setState(.failed(reason))
+                }
+                // Drop the socket without letting it report a second state change.
+                let connection = server
                 server = nil
+                connection?.onClosed = nil
+                connection?.cancel()
+                publish { self.messages.send(reason) }
                 return
             }
             setState(.loggedIn(username: ownUsername))
@@ -311,7 +328,13 @@ final class SoulseekClient {
             publish { self.excludedPhrases.send(phrases) }
 
         case .relogged:
-            disconnectLocked(reason: "Signed in from another client")
+            // Another client took over the session. Drop the saved password so this device does
+            // not immediately reconnect and fight it, and let the user know why they are back
+            // at the login form.
+            let reason = "Signed in from another client"
+            store.password = ""
+            disconnectLocked(reason: reason)
+            setState(.failed(reason))
 
         default:
             break
@@ -773,6 +796,14 @@ final class SoulseekClient {
         guard (1...30).contains(username.count) else { return false }
         return username.allSatisfy { character in
             character.isLetter || character.isNumber || character == "_" || character == "-" || character == "."
+        }
+    }
+
+    /// Rejections that say nothing about the credentials themselves and may succeed later.
+    private static func isRetryable(rejection: String) -> Bool {
+        switch rejection {
+        case "SVRFULL", "SVRPRIVATE", "": return true
+        default: return false
         }
     }
 

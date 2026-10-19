@@ -122,6 +122,8 @@ enum ConnectionState: Equatable {
     case connecting
     case connectingToServer
     case loggedIn(username: String)
+    /// The saved credentials cannot be used, so the login form is required. Temporary
+    /// connection problems are reported as `.disconnected` instead.
     case failed(String)
 
     var isLoggedIn: Bool {
