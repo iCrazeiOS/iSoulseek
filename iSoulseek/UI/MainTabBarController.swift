@@ -18,6 +18,9 @@ final class MainTabBarController: UITabBarController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        // Without this the bar turns transparent when a tab's table view reaches its bottom.
+        tabBar.scrollEdgeAppearance = tabBar.standardAppearance
+
         let search = SearchViewController(client: client)
         let downloads = DownloadsViewController(client: client)
         let settings = SettingsViewController(client: client)
