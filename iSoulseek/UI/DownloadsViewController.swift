@@ -21,8 +21,6 @@ final class DownloadsViewController: UIViewController {
     private var completedFiles: [DownloadedFile] = []
     private var displayed: [Item] = []
     private var scanScheduled = false
-    private var isSwipingRow = false
-    private var rebuildDeferred = false
     private var scanGeneration = 0
     private var previewURL: URL?
     private var sortOrder: DownloadSortOrder = .newest
@@ -226,11 +224,6 @@ final class DownloadsViewController: UIViewController {
     }
 
     private func rebuild() {
-        guard !isSwipingRow else {
-            rebuildDeferred = true
-            return
-        }
-
         let active = transfers.filter { $0.state.isActive }
         let completed = visibleCompletedFiles(active: active)
         displayed = showsCompleted
@@ -368,17 +361,6 @@ extension DownloadsViewController: UITableViewDelegate {
         presentPreview(for: file)
     }
 
-    func tableView(_ tableView: UITableView, willBeginEditingRowAt indexPath: IndexPath) {
-        isSwipingRow = true
-    }
-
-    func tableView(_ tableView: UITableView, didEndEditingRowAt indexPath: IndexPath?) {
-        isSwipingRow = false
-        guard rebuildDeferred else { return }
-        rebuildDeferred = false
-        rebuild()
-    }
-
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath)
     -> UISwipeActionsConfiguration? {
         switch displayed[indexPath.row] {
@@ -393,9 +375,9 @@ extension DownloadsViewController: UITableViewDelegate {
             let action = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, completion in
                 guard let self else { completion(false); return }
                 DownloadedFiles.delete(file.url, upTo: self.client.store.downloadsDirectory)
+                self.scanGeneration += 1
                 self.completedFiles.removeAll { $0.url == file.url }
                 self.rebuild()
-                self.reloadCompletedFiles()
                 Theme.showToast("Deleted \(file.name)", in: self.view)
                 completion(true)
             }
