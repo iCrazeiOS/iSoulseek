@@ -309,11 +309,6 @@ final class SearchViewController: UIViewController {
         options.allows(item.result)
     }
 
-    private func firstVisibleResult(forKey key: String) -> SearchResult? {
-        guard let section = sectionsByKey[key] else { return nil }
-        return sorted(section.items.filter(passesFilter)).first?.result
-    }
-
     private func sorted(_ items: [Item]) -> [Item] {
         guard options.sortOrder != .arrival else { return items }
         return items.sorted { lhs, rhs in
@@ -477,11 +472,6 @@ extension SearchViewController: UITableViewDelegate {
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: SearchSectionHeader.reuseIdentifier) as? SearchSectionHeader
         header?.configure(username: model.displayName, count: model.items.count)
-        header?.onBrowse = { [weak self] in
-            guard let self else { return }
-            let folder = self.firstVisibleResult(forKey: model.displayName.lowercased())?.folderPath
-            self.pushBrowse(username: model.displayName, folder: folder)
-        }
         return header
     }
 
@@ -494,12 +484,17 @@ extension SearchViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath)
     -> UISwipeActionsConfiguration? {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return nil }
-        let action = UIContextualAction(style: .normal, title: "Download") { [weak self] _, _, completion in
+        let download = UIContextualAction(style: .normal, title: "Download") { [weak self] _, _, completion in
             self?.download(item.result)
             completion(true)
         }
-        action.backgroundColor = .systemBlue
-        return UISwipeActionsConfiguration(actions: [action])
+        download.backgroundColor = .systemBlue
+        let browse = UIContextualAction(style: .normal, title: "Browse") { [weak self] _, _, completion in
+            self?.pushBrowse(username: item.result.username, folder: item.result.folderPath)
+            completion(true)
+        }
+        browse.backgroundColor = .systemGray
+        return UISwipeActionsConfiguration(actions: [download, browse])
     }
 }
 
@@ -650,11 +645,8 @@ private final class SearchSectionHeader: UITableViewHeaderFooterView {
 
     static let reuseIdentifier = "SearchSectionHeader"
 
-    var onBrowse: (() -> Void)?
-
     private let nameLabel = UILabel()
     private let countLabel = UILabel()
-    private let browseButton = UIButton(type: .system)
 
     override init(reuseIdentifier: String?) {
         super.init(reuseIdentifier: reuseIdentifier)
@@ -683,11 +675,7 @@ private final class SearchSectionHeader: UITableViewHeaderFooterView {
         countLabel.adjustsFontForContentSizeCategory = true
         countLabel.textColor = .secondaryLabel
 
-        browseButton.setTitle("Browse", for: .normal)
-        browseButton.titleLabel?.font = .preferredFont(forTextStyle: .subheadline)
-        browseButton.addTarget(self, action: #selector(browseTapped), for: .touchUpInside)
-
-        let row = UIStackView(arrangedSubviews: [nameLabel, countLabel, browseButton])
+        let row = UIStackView(arrangedSubviews: [nameLabel, countLabel])
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = 8
@@ -695,7 +683,7 @@ private final class SearchSectionHeader: UITableViewHeaderFooterView {
         contentView.addSubview(row)
 
         nameLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        browseButton.setContentHuggingPriority(.required, for: .horizontal)
+        countLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         NSLayoutConstraint.activate([
             row.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
@@ -703,9 +691,5 @@ private final class SearchSectionHeader: UITableViewHeaderFooterView {
             row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             row.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
         ])
-    }
-
-    @objc private func browseTapped() {
-        onBrowse?()
     }
 }
