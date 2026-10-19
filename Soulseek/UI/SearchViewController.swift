@@ -35,6 +35,7 @@ final class SearchViewController: UIViewController {
     private var hasSearched = false
     private var activeToken: UInt32?
     private var options = SearchOptions()
+    private var showsCancelButton = false
 
     // MARK: Views
 
@@ -49,6 +50,7 @@ final class SearchViewController: UIViewController {
     private let searchBar = UISearchBar()
     private let messageView = MessageView()
     private let statusLabel = UILabel()
+    private let statusRow = UIView()
 
     private lazy var dataSource: UITableViewDiffableDataSource<String, Item> = {
         UITableViewDiffableDataSource(tableView: tableView) { tableView, indexPath, item in
@@ -59,9 +61,6 @@ final class SearchViewController: UIViewController {
         }
     }()
 
-    private lazy var statusItem = UIBarButtonItem(customView: statusLabel)
-    private lazy var cancelItem = UIBarButtonItem(title: "Cancel", style: .plain,
-                                                  target: self, action: #selector(cancelSearch))
     private lazy var optionsItem = UIBarButtonItem(image: nil, style: .plain,
                                                    target: nil, action: nil)
 
@@ -85,16 +84,16 @@ final class SearchViewController: UIViewController {
 
         configureSearchBar()
         configureTable()
+        configureLayout()
         configureNavigation()
         observeClient()
         updateOptionsMenu()
         updateBackground()
-        updateToolbar()
+        updateStatus()
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        navigationController?.setToolbarHidden(false, animated: animated)
         // Pick up changes made from Settings while this tab was away.
         let stored = client.store.searchOptions
         if stored != options {
@@ -104,24 +103,16 @@ final class SearchViewController: UIViewController {
         }
     }
 
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        navigationController?.setToolbarHidden(true, animated: animated)
-    }
-
     private func configureSearchBar() {
-        searchBar.translatesAutoresizingMaskIntoConstraints = false
         searchBar.placeholder = "Artist, album or file name"
         searchBar.autocapitalizationType = .none
         searchBar.autocorrectionType = .no
         searchBar.returnKeyType = .search
         searchBar.searchBarStyle = .minimal
         searchBar.delegate = self
-        view.addSubview(searchBar)
     }
 
     private func configureTable() {
-        tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.dataSource = dataSource
         tableView.delegate = self
         tableView.rowHeight = UITableView.automaticDimension
@@ -132,16 +123,35 @@ final class SearchViewController: UIViewController {
         tableView.register(SearchResultCell.self, forCellReuseIdentifier: SearchResultCell.reuseIdentifier)
         tableView.register(SearchSectionHeader.self,
                            forHeaderFooterViewReuseIdentifier: SearchSectionHeader.reuseIdentifier)
-        view.addSubview(tableView)
-        NSLayoutConstraint.activate([
-            searchBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            searchBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            searchBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+    }
 
-            tableView.topAnchor.constraint(equalTo: searchBar.bottomAnchor),
-            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+    /// A plain label rather than a bar button item, so it does not take on the interactive
+    /// "Liquid Glass" styling of the toolbar and cannot be mistaken for a control.
+    private func configureLayout() {
+        statusLabel.font = .preferredFont(forTextStyle: .footnote)
+        statusLabel.adjustsFontForContentSizeCategory = true
+        statusLabel.textColor = .secondaryLabel
+        statusLabel.adjustsFontSizeToFitWidth = true
+        statusLabel.minimumScaleFactor = 0.8
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        statusRow.addSubview(statusLabel)
+        statusRow.isHidden = true
+
+        let stack = UIStackView(arrangedSubviews: [searchBar, statusRow, tableView])
+        stack.axis = .vertical
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            statusLabel.topAnchor.constraint(equalTo: statusRow.topAnchor, constant: 2),
+            statusLabel.leadingAnchor.constraint(equalTo: statusRow.leadingAnchor, constant: 16),
+            statusLabel.trailingAnchor.constraint(equalTo: statusRow.trailingAnchor, constant: -16),
+            statusLabel.bottomAnchor.constraint(equalTo: statusRow.bottomAnchor, constant: -8),
+
+            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
     }
 
@@ -149,10 +159,6 @@ final class SearchViewController: UIViewController {
         navigationItem.leftBarButtonItem = optionsItem
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Browse user…", style: .plain,
                                                             target: self, action: #selector(promptForUsername))
-
-        statusLabel.font = .preferredFont(forTextStyle: .footnote)
-        statusLabel.adjustsFontForContentSizeCategory = true
-        statusLabel.lineBreakMode = .byTruncatingTail
     }
 
     private func observeClient() {
@@ -168,11 +174,6 @@ final class SearchViewController: UIViewController {
     }
 
     // MARK: Searching
-
-    @objc private func cancelSearch() {
-        guard let token = activeToken else { return }
-        client.cancelSearch(token)
-    }
 
     private func startSearch(_ query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -193,7 +194,7 @@ final class SearchViewController: UIViewController {
         }
         activeToken = token
         updateBackground()
-        updateToolbar()
+        updateStatus()
     }
 
     private func finishSearch(_ token: UInt32) {
@@ -201,7 +202,7 @@ final class SearchViewController: UIViewController {
         activeToken = nil
         flushNow()
         updateBackground()
-        updateToolbar()
+        updateStatus()
     }
 
     private func resetResults() {
@@ -223,7 +224,7 @@ final class SearchViewController: UIViewController {
         guard displayedCount < Self.maximumResults else {
             if !isCapped {
                 isCapped = true
-                updateToolbar()
+                updateStatus()
             }
             return
         }
@@ -294,7 +295,7 @@ final class SearchViewController: UIViewController {
         visibleCount = keys.reduce(0) { $0 + (visible[$1]?.count ?? 0) }
         dataSource.apply(snapshot, animatingDifferences: false)
         updateBackground()
-        updateToolbar()
+        updateStatus()
     }
 
     private func passesFilter(_ item: Item) -> Bool {
@@ -331,24 +332,34 @@ final class SearchViewController: UIViewController {
         tableView.backgroundView = messageView
     }
 
-    private func updateToolbar() {
+    private func updateStatus() {
+        let text: String?
         if activeToken != nil {
-            statusLabel.text = isCapped
+            text = isCapped
                 ? "Searching… \(visibleCount.formatted()) shown (capped)"
                 : "Searching… \(visibleCount.formatted()) shown"
         } else if visibleCount > 0 {
-            statusLabel.text = isCapped
+            text = isCapped
                 ? "\(visibleCount.formatted()) shown (first \(Self.maximumResults.formatted()))"
                 : "\(visibleCount.formatted()) results"
         } else if displayedCount > 0 {
-            statusLabel.text = "No matches"
+            text = "No matches"
         } else {
-            statusLabel.text = "Search the network"
+            text = nil
         }
 
-        var items: [UIBarButtonItem] = [statusItem, .flexibleSpace()]
-        if activeToken != nil { items.append(cancelItem) }
-        setToolbarItems(items, animated: false)
+        statusLabel.text = text
+        statusRow.isHidden = (text == nil)
+        updateCancelButton()
+    }
+
+    /// The search bar's own cancel button doubles as "stop this search", so it stays visible while a
+    /// query is running even after the keyboard is dismissed.
+    private func updateCancelButton() {
+        let visible = searchBar.isFirstResponder || activeToken != nil
+        guard visible != showsCancelButton else { return }
+        showsCancelButton = visible
+        searchBar.setShowsCancelButton(visible, animated: true)
     }
 
     // MARK: Options
@@ -480,16 +491,16 @@ extension SearchViewController: UITableViewDelegate {
 extension SearchViewController: UISearchBarDelegate {
 
     func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
-        searchBar.resignFirstResponder()
         startSearch(searchBar.text ?? "")
+        searchBar.resignFirstResponder()
     }
 
     func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
-        searchBar.setShowsCancelButton(true, animated: true)
+        updateCancelButton()
     }
 
     func searchBarTextDidEndEditing(_ searchBar: UISearchBar) {
-        searchBar.setShowsCancelButton(false, animated: true)
+        updateCancelButton()
     }
 
     func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {

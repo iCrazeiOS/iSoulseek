@@ -54,11 +54,6 @@ final class DownloadsViewController: UIViewController {
             .store(in: &cancellables)
     }
 
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        navigationController?.setToolbarHidden(true, animated: animated)
-    }
-
     private func configureLayout() {
         tabControl.selectedSegmentIndex = 0
         tabControl.addTarget(self, action: #selector(tabChanged), for: .valueChanged)

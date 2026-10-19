@@ -32,11 +32,6 @@ final class BrowseViewController: UIViewController {
         load()
     }
 
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        navigationController?.setToolbarHidden(true, animated: animated)
-    }
-
     private func configureTable() {
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.dataSource = self

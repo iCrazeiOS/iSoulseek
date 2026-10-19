@@ -70,7 +70,6 @@ final class SettingsViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        navigationController?.setToolbarHidden(true, animated: animated)
         // Reflect any filter/sort change made from the search screen.
         rebuild()
     }
