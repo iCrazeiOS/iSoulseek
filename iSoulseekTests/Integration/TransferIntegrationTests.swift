@@ -50,16 +50,43 @@ final class TransferIntegrationTests: XCTestCase {
                       "completed downloads belong to the filesystem, not the transfer list")
     }
 
+    /// Peers may omit the size and signal completion by closing the file connection.
+    func testDownloadCompletesWhenPeerOmitsSize() {
+        let payload = makePayload(2048)
+        env.peer.downloadPayload = payload
+        env.peer.downloadReportsSize = false
+        let filename = "Music\\unsized.bin"
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        var transfers: [Transfer] = []
+        let cancellable = env.client.transferChanges.sink { transfers.append($0) }
+        defer { cancellable.cancel() }
+
+        env.client.download(username: "MockPeer", filename: filename, size: 0)
+
+        assertEventually("download never completed", timeout: 3) {
+            transfers.last(where: { !$0.isUpload })?.state == .completed
+        }
+
+        let destination = env.downloadsDirectory.appendingPathComponent("Music/unsized.bin")
+        assertEventually("file was not written", timeout: 3) {
+            (try? Data(contentsOf: destination)) == payload
+        }
+        XCTAssertTrue(env.client.transfers().isEmpty,
+                      "completed downloads belong to the filesystem, not the transfer list")
+    }
+
     func testDownloadResumesFromExistingBytes() {
         let payload = makePayload(1000)
         env.peer.downloadPayload = payload
         let filename = "Music\\resume.bin"
         let destination = env.downloadsDirectory.appendingPathComponent("Music/resume.bin")
+        let partial = env.downloadsDirectory.appendingPathComponent(".partials/Music/resume.bin")
 
         // Pre-create a partial download with the first 300 bytes already on disk.
-        try? FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
+        try? FileManager.default.createDirectory(at: partial.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
-        try? payload.prefix(300).write(to: destination)
+        try? payload.prefix(300).write(to: partial)
 
         XCTAssertTrue(env.connectAndWaitForLogin())
 
@@ -229,6 +256,10 @@ final class TransferIntegrationTests: XCTestCase {
 
         let first = env.downloadsDirectory.appendingPathComponent("Music/Album/one.bin")
         let second = env.downloadsDirectory.appendingPathComponent("Music/Album/two.bin")
+        let partial = env.downloadsDirectory.appendingPathComponent(".partials/Music/Album/three.bin")
+        try? FileManager.default.createDirectory(at: partial.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        try? Data(repeating: 0xEE, count: 10).write(to: partial)
         XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
 
@@ -237,6 +268,7 @@ final class TransferIntegrationTests: XCTestCase {
         assertEventually("download files were not deleted", timeout: 3) {
             !FileManager.default.fileExists(atPath: first.path)
                 && !FileManager.default.fileExists(atPath: second.path)
+                && !FileManager.default.fileExists(atPath: partial.path)
         }
         XCTAssertTrue(env.client.transfers().isEmpty)
         assertEventually("empty folders were not cleaned up", timeout: 3) {

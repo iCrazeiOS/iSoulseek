@@ -36,13 +36,19 @@ final class TransferManager {
         let username: String
         let filename: String
         let key: String
+        /// Final location, visible in the downloads folder only once the transfer completes.
         let url: URL
+        /// Hidden working copy. Keeping partial data here means it never appears as a completed
+        /// download, while still allowing an interrupted transfer to resume.
+        let partURL: URL
         var expectedSize: UInt64
         var offset: UInt64
         var transferred: UInt64
         var isStarted = false
         /// Set once the peer has sent `TransferRequest`, i.e. a file connection may now arrive.
         var awaitingFileConnection = false
+        /// Set while the partial is being promoted to its final location. Further data is ignored.
+        var isFinishing = false
         var timeout: DispatchWorkItem?
     }
 
@@ -88,6 +94,12 @@ final class TransferManager {
 
     var allTransfers: [Transfer] { transfers }
 
+    /// Hidden directory holding in-progress downloads. `DownloadedFiles.scan` skips hidden
+    /// entries, so partial files can never show up in the completed list.
+    private var partialsDirectory: URL {
+        downloadsDirectory.appendingPathComponent(".partials", isDirectory: true)
+    }
+
     /// Whether we still owe or expect work involving this user on their peer session.
     func hasPendingWork(username: String) -> Bool {
         let wanted = username.lowercased()
@@ -103,7 +115,9 @@ final class TransferManager {
 
     @discardableResult
     func enqueueDownload(username: String, filename: String, size: UInt64) -> DownloadStartResult? {
-        guard let url = PathSanitizer.destination(in: downloadsDirectory, virtualPath: filename) else {
+        guard let url = PathSanitizer.destination(in: downloadsDirectory, virtualPath: filename),
+              let partURL = PathSanitizer.destination(in: partialsDirectory,
+                                                      virtualPath: filename) else {
             return nil
         }
 
@@ -116,20 +130,20 @@ final class TransferManager {
 
         let id = allocateToken()
         let key = Self.key(username: username, filename: filename)
-        let existingBytes = fileSize(of: url) ?? 0
+        let finalBytes = fileSize(of: url) ?? 0
+        let partBytes = fileSize(of: partURL) ?? 0
         let offset: UInt64
-        if size == 0 {
-            offset = 0
-        } else if existingBytes == size {
+        if size > 0 && finalBytes == size {
             offset = size
-        } else if existingBytes > size {
-            offset = 0
+        } else if size > 0 && partBytes > 0 && partBytes < size {
+            offset = partBytes
         } else {
-            offset = existingBytes
+            offset = 0
         }
 
         let download = Download(id: id, username: username, filename: filename, key: key,
-                                url: url, expectedSize: size, offset: offset, transferred: 0)
+                                url: url, partURL: partURL,
+                                expectedSize: size, offset: offset, transferred: 0)
 
         var transfer = Transfer(id: id, username: username, filename: filename,
                                 size: size > 0 ? size : offset, isUpload: false)
@@ -139,6 +153,10 @@ final class TransferManager {
         onUpdate?(transfer)
 
         guard transfer.state != .completed else {
+            if partBytes > 0 {
+                let root = partialsDirectory
+                ioQueue.async { DownloadedFiles.delete(partURL, upTo: root) }
+            }
             discardDownload(id)
             return .alreadyDownloaded(transfer)
         }
@@ -168,9 +186,21 @@ final class TransferManager {
             download.timeout?.cancel()
             downloadsByKey.removeValue(forKey: download.key)
             downloadConnections.removeValue(forKey: id)?.cancel()
-            openHandles.removeValue(forKey: id)?.closeFile()
+            let handle = openHandles.removeValue(forKey: id)
             updateTransfer(id) { $0.state = .cancelled }
             discardDownload(id)
+
+            // Cancelling discards the partial data rather than leaving it to look like a
+            // completed download. Closing on the I/O queue keeps it behind any queued writes.
+            let root = partialsDirectory
+            let partURL = download.partURL
+            ioQueue.async {
+                try? handle?.close()
+                DownloadedFiles.delete(partURL, upTo: root)
+            }
+            if !hasPendingWork(username: download.username) {
+                onUserWorkFinished?(download.username)
+            }
             return
         }
         if let upload = uploads.removeValue(forKey: id) {
@@ -329,6 +359,11 @@ final class TransferManager {
                 guard let handle else {
                     self.failDownload(username: download.username, filename: download.filename,
                                       reason: "Cannot write to disk")
+                    return
+                }
+                // The transfer may have been cancelled or failed while the file was opening.
+                guard self.downloads[id] != nil else {
+                    self.ioQueue.async { try? handle.close() }
                     return
                 }
                 self.openHandles[id] = handle
@@ -625,7 +660,8 @@ final class TransferManager {
     // MARK: Download plumbing
 
     private func write(_ chunk: Data, to id: UInt32, connection: SocketConnection) {
-        guard var download = downloads[id], let handle = openHandles[id] else {
+        guard var download = downloads[id], !download.isFinishing,
+              let handle = openHandles[id] else {
             connection.cancel()
             return
         }
@@ -635,22 +671,44 @@ final class TransferManager {
         let total = download.transferred
         let expected = download.expectedSize
         ioQueue.async {
-            try? handle.write(contentsOf: chunk)
-            if expected > 0 && total >= expected {
-                try? handle.close()
+            do {
+                try handle.write(contentsOf: chunk)
+            } catch {
                 self.queue.async {
-                    self.completeDownload(id: id)
-                    connection.cancel()
+                    self.failDownload(username: download.username, filename: download.filename,
+                                      reason: "Could not write to disk")
                 }
+                return
+            }
+            if expected > 0 && total >= expected {
+                self.queue.async { self.completeDownload(id: id) }
                 return
             }
             self.queue.async { self.reportProgress(id: id) }
         }
     }
 
-    /// Marks a download finished and releases everything it held.
+    /// Moves a finished partial download to its final location. A same-volume rename, so it is
+    /// cheap; running it after the I/O barrier guarantees every received byte has been written.
+    private static func move(_ source: URL, to destination: URL) -> Bool {
+        let fileManager = FileManager.default
+        do {
+            try fileManager.createDirectory(at: destination.deletingLastPathComponent(),
+                                            withIntermediateDirectories: true)
+            if fileManager.fileExists(atPath: destination.path) {
+                try fileManager.removeItem(at: destination)
+            }
+            try fileManager.moveItem(at: source, to: destination)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Marks a download finished and releases everything it held. Called for a known-size transfer
+    /// once the last chunk arrives, and from `onClosed` for peers that never state a size.
     private func completeDownload(id: UInt32) {
-        guard let download = downloads[id] else { return }
+        guard let download = downloads[id], !download.isFinishing else { return }
         let reachedEnd = download.expectedSize > 0
             ? download.transferred >= download.expectedSize
             : download.transferred > 0
@@ -659,16 +717,42 @@ final class TransferManager {
                          reason: "Connection closed early")
             return
         }
+
+        downloads[id]?.isFinishing = true
+        downloadConnections.removeValue(forKey: id)?.cancel()
+
+        // Wait for queued writes before closing the handle and promoting the partial. Bouncing
+        // through the I/O queue also means a cancel that lands before the move still wins.
+        ioQueue.async {
+            self.queue.async { self.finishDownload(id: id) }
+        }
+    }
+
+    /// Runs on the client queue after every write has reached disk.
+    private func finishDownload(id: UInt32) {
+        guard let download = downloads[id], download.isFinishing else { return }
+        if let handle = openHandles.removeValue(forKey: id) {
+            try? handle.close()
+        }
+
+        guard Self.move(download.partURL, to: download.url) else {
+            failDownload(username: download.username, filename: download.filename,
+                         reason: "Could not save the download")
+            return
+        }
+
         downloads.removeValue(forKey: id)
         download.timeout?.cancel()
         downloadsByKey.removeValue(forKey: download.key)
         downloadConnections.removeValue(forKey: id)?.cancel()
-        openHandles.removeValue(forKey: id)?.closeFile()
         updateTransfer(id) { $0.state = .completed }
         discardDownload(id)
         if !hasPendingWork(username: download.username) {
             onUserWorkFinished?(download.username)
         }
+
+        let root = partialsDirectory
+        ioQueue.async { DownloadedFiles.pruneEmptyParents(of: download.partURL, upTo: root) }
     }
 
     private func reportProgress(id: UInt32) {
@@ -681,7 +765,7 @@ final class TransferManager {
     }
 
     private func prepareDownloadFile(id: UInt32, download: Download, completion: @escaping (FileHandle?) -> Void) {
-        let url = download.url
+        let url = download.partURL
         let offset = download.offset
         ioQueue.async {
             let directory = url.deletingLastPathComponent()
@@ -705,9 +789,12 @@ final class TransferManager {
         downloads.removeValue(forKey: id)
         downloadsByKey.removeValue(forKey: key)
         downloadConnections.removeValue(forKey: id)?.cancel()
-        openHandles.removeValue(forKey: id)?.closeFile()
+        let handle = openHandles.removeValue(forKey: id)
         updateTransfer(id) { $0.state = .failed(reason.isEmpty ? "Refused" : reason) }
         discardDownload(id)
+        // The hidden partial is kept for a later resume, but the handle closes only after any
+        // writes queued before the failure have run.
+        ioQueue.async { try? handle?.close() }
         if !hasPendingWork(username: username) {
             onUserWorkFinished?(username)
         }

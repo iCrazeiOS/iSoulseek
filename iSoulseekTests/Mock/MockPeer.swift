@@ -27,6 +27,9 @@ final class MockPeer {
 
     // Download configuration: bytes we serve when the client downloads from us.
     var downloadPayload = Data()
+    /// When false, the transfer request omits the size and the connection is closed when the
+    /// payload has been sent, which is how some peers signal completion.
+    var downloadReportsSize = true
     var downloadToken: UInt32 = 0x0FFF_0001
     /// When true, the mock refuses the direct route and makes the client dial it back instead.
     var downloadViaIndirect = false
@@ -309,7 +312,9 @@ final class MockPeer {
             request.u32(1) // direction = upload
             request.u32(downloadToken)
             request.string(filename)
-            request.u64(UInt64(downloadPayload.count))
+            if downloadReportsSize {
+                request.u64(UInt64(downloadPayload.count))
+            }
             channel.send(code: 40, payload: request.data)
 
         case 40: // TransferRequest (client is the uploader)
@@ -398,7 +403,10 @@ final class MockPeer {
                 let total = UInt64(self.downloadPayload.count)
                 let start = Int(min(offset, total))
                 let remaining = self.downloadPayload.subdata(in: start..<self.downloadPayload.count)
-                channel.sendRaw(remaining)
+                let closeWhenDone = !self.downloadReportsSize
+                channel.sendRaw(remaining) { _ in
+                    if closeWhenDone { channel.cancel() }
+                }
             }
         }
         channel.start()
@@ -419,7 +427,11 @@ final class MockPeer {
 
             let total = UInt64(self.downloadPayload.count)
             let start = Int(min(offset, total))
-            channel.sendRaw(self.downloadPayload.subdata(in: start..<self.downloadPayload.count))
+            let remaining = self.downloadPayload.subdata(in: start..<self.downloadPayload.count)
+            let closeWhenDone = !self.downloadReportsSize
+            channel.sendRaw(remaining) { _ in
+                if closeWhenDone { channel.cancel() }
+            }
         }
         // The uploader speaks first on an `F` connection: the transfer token, then the file.
         var tokenBytes = MockWriter()

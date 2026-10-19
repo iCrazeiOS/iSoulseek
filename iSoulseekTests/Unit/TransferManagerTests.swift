@@ -70,7 +70,7 @@ final class TransferManagerTests: XCTestCase {
     }
 
     func testPartialExistingFileResumes() throws {
-        _ = try write("Music/song.flac", bytes: 40)
+        _ = try write(".partials/Music/song.flac", bytes: 40)
 
         let result = manager.enqueueDownload(username: "alice", filename: "Music\\song.flac", size: 100)
         guard case .added(let transfer) = result else {
@@ -79,5 +79,20 @@ final class TransferManagerTests: XCTestCase {
 
         XCTAssertEqual(transfer.transferred, 40)
         XCTAssertEqual(transfer.state, .negotiating)
+    }
+
+    func testCancelDiscardsPartialFile() throws {
+        let partial = try write(".partials/Music/song.flac", bytes: 40)
+
+        let result = manager.enqueueDownload(username: "alice", filename: "Music\\song.flac", size: 100)
+        guard case .added(let transfer) = result else {
+            return XCTFail("download was not added")
+        }
+
+        manager.cancel(id: transfer.id)
+
+        assertEventually("the partial file was left on disk") {
+            !FileManager.default.fileExists(atPath: partial.path)
+        }
     }
 }

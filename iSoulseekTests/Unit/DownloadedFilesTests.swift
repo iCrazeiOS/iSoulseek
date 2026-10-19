@@ -50,6 +50,13 @@ final class DownloadedFilesTests: XCTestCase {
         XCTAssertEqual(song.size, 5)
     }
 
+    func testScanSkipsInProgressDownloads() throws {
+        _ = try write(".partials/Artist/Album/song.mp3", bytes: 5)
+        _ = try write("complete.flac", bytes: 3)
+
+        XCTAssertEqual(DownloadedFiles.scan(in: root).map(\.relativePath), ["complete.flac"])
+    }
+
     func testSortOrders() {
         let newest = DownloadedFile(url: URL(fileURLWithPath: "/A.flac"), relativePath: "A.flac",
                                     name: "A.flac", size: 1,
@@ -85,5 +92,18 @@ final class DownloadedFilesTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: rootFile.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.path),
                       "the downloads root must be kept")
+    }
+
+    func testPruneEmptyParentsNeverRemovesFiles() throws {
+        let nested = try write("Artist/Album/song.mp3")
+
+        DownloadedFiles.pruneEmptyParents(of: nested, upTo: root)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: nested.path))
+
+        try FileManager.default.removeItem(at: nested)
+        DownloadedFiles.pruneEmptyParents(of: nested, upTo: root)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("Artist").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.path))
     }
 }

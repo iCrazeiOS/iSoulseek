@@ -88,6 +88,11 @@ enum DownloadedFiles {
         removeEmptyParents(of: url, upTo: root)
     }
 
+    /// Removes folders left empty by a file that was already moved elsewhere.
+    static func pruneEmptyParents(of url: URL, upTo root: URL) {
+        removeEmptyParents(of: url, upTo: root)
+    }
+
     private static func removeEmptyParents(of url: URL, upTo root: URL) {
         var directory = url.deletingLastPathComponent().standardizedFileURL
         let rootPath = root.standardizedFileURL.path
