@@ -34,7 +34,7 @@ final class SearchViewController: UIViewController {
     private var isCapped = false
     private var hasSearched = false
     private var activeToken: UInt32?
-    private var options = SearchOptions()
+    private var sortOrder: SearchSortOrder = .arrival
     private var showsCancelButton = false
 
     // MARK: Views
@@ -61,8 +61,8 @@ final class SearchViewController: UIViewController {
         }
     }()
 
-    private lazy var optionsItem = UIBarButtonItem(image: nil, style: .plain,
-                                                   target: nil, action: nil)
+    private lazy var sortItem = UIBarButtonItem(image: nil, style: .plain,
+                                                target: nil, action: nil)
     private lazy var browseItem: UIBarButtonItem = {
         let item = UIBarButtonItem(image: UIImage(systemName: "person.wave.2.fill"),
                                    style: .plain,
@@ -88,14 +88,14 @@ final class SearchViewController: UIViewController {
         super.viewDidLoad()
         title = "Search"
         view.backgroundColor = .systemBackground
-        options = client.store.searchOptions
+        sortOrder = client.store.searchSortOrder
 
         configureSearchBar()
         configureTable()
         configureLayout()
         configureNavigation()
         observeClient()
-        updateOptionsMenu()
+        updateSortMenu()
         updateBackground()
         updateStatus()
     }
@@ -103,10 +103,10 @@ final class SearchViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         // Pick up changes made from Settings while this tab was away.
-        let stored = client.store.searchOptions
-        if stored != options {
-            options = stored
-            updateOptionsMenu()
+        let stored = client.store.searchSortOrder
+        if stored != sortOrder {
+            sortOrder = stored
+            updateSortMenu()
             applySnapshot()
         }
     }
@@ -164,7 +164,7 @@ final class SearchViewController: UIViewController {
     }
 
     private func configureNavigation() {
-        navigationItem.leftBarButtonItem = optionsItem
+        navigationItem.leftBarButtonItem = sortItem
         navigationItem.rightBarButtonItem = browseItem
     }
 
@@ -282,11 +282,11 @@ final class SearchViewController: UIViewController {
         }
 
         var keys = order.filter { visible[$0] != nil }
-        if options.sortOrder != .arrival {
+        if sortOrder != .arrival {
             keys.sort { lhs, rhs in
                 guard let left = visible[lhs]?.first, let right = visible[rhs]?.first else { return false }
-                if options.isOrderedBefore(left.result, right.result) { return true }
-                if options.isOrderedBefore(right.result, left.result) { return false }
+                if sortOrder.isOrderedBefore(left.result, right.result) { return true }
+                if sortOrder.isOrderedBefore(right.result, left.result) { return false }
                 return left.id < right.id
             }
         }
@@ -304,10 +304,10 @@ final class SearchViewController: UIViewController {
     }
 
     private func sorted(_ items: [Item]) -> [Item] {
-        guard options.sortOrder != .arrival else { return items }
+        guard sortOrder != .arrival else { return items }
         return items.sorted { lhs, rhs in
-            if options.isOrderedBefore(lhs.result, rhs.result) { return true }
-            if options.isOrderedBefore(rhs.result, lhs.result) { return false }
+            if sortOrder.isOrderedBefore(lhs.result, rhs.result) { return true }
+            if sortOrder.isOrderedBefore(rhs.result, lhs.result) { return false }
             return lhs.id < rhs.id
         }
     }
@@ -359,20 +359,20 @@ final class SearchViewController: UIViewController {
 
     // MARK: Options
 
-    private func updateOptionsMenu() {
-        optionsItem.image = UIImage(systemName: "arrow.up.arrow.down")
-        optionsItem.accessibilityLabel = "Sort results"
-        optionsItem.menu = UIMenu(children: SearchSortOrder.allCases.map { order in
-            UIAction(title: order.displayName, state: options.sortOrder == order ? .on : .off) { [weak self] _ in
-                self?.setOptions { $0.sortOrder = order }
+    private func updateSortMenu() {
+        sortItem.image = UIImage(systemName: "arrow.up.arrow.down")
+        sortItem.accessibilityLabel = "Sort results"
+        sortItem.menu = UIMenu(children: SearchSortOrder.allCases.map { order in
+            UIAction(title: order.displayName, state: sortOrder == order ? .on : .off) { [weak self] _ in
+                self?.setSortOrder(order)
             }
         })
     }
 
-    private func setOptions(_ mutate: (inout SearchOptions) -> Void) {
-        mutate(&options)
-        client.store.searchOptions = options
-        updateOptionsMenu()
+    private func setSortOrder(_ order: SearchSortOrder) {
+        sortOrder = order
+        client.store.searchSortOrder = order
+        updateSortMenu()
         applySnapshot()
     }
 

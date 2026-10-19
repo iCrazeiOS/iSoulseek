@@ -72,15 +72,10 @@ enum SearchSortOrder: Int, CaseIterable {
         case .duration: return "Longest"
         }
     }
-}
-
-/// Ordering applied to search results, persisted between launches.
-struct SearchOptions: Equatable {
-    var sortOrder: SearchSortOrder = .arrival
 
     /// Strict ordering between two results; returns false both ways when they are equal.
     func isOrderedBefore(_ lhs: SearchResult, _ rhs: SearchResult) -> Bool {
-        switch sortOrder {
+        switch self {
         case .arrival: return false
         case .largest: return lhs.file.size > rhs.file.size
         case .smallest: return lhs.file.size < rhs.file.size

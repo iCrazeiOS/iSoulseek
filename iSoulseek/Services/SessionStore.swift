@@ -58,14 +58,12 @@ final class SessionStore {
         set { defaults.set(Int(newValue.rawValue), forKey: Key.status) }
     }
 
-    var searchOptions: SearchOptions {
+    var searchSortOrder: SearchSortOrder {
         get {
-            SearchOptions(
-                sortOrder: SearchSortOrder(rawValue: defaults.integer(forKey: Key.searchSortOrder)) ?? .arrival
-            )
+            SearchSortOrder(rawValue: defaults.integer(forKey: Key.searchSortOrder)) ?? .arrival
         }
         set {
-            defaults.set(newValue.sortOrder.rawValue, forKey: Key.searchSortOrder)
+            defaults.set(newValue.rawValue, forKey: Key.searchSortOrder)
         }
     }
 

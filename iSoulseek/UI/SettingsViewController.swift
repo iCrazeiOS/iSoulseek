@@ -122,7 +122,7 @@ final class SettingsViewController: UIViewController {
         ]
 
         let search = [
-            Item(title: "Sort results", value: store.searchOptions.sortOrder.displayName,
+            Item(title: "Sort results", value: store.searchSortOrder.displayName,
                  accessory: .disclosureIndicator, action: { [weak self] in self?.chooseSortOrder() }),
         ]
 
@@ -211,13 +211,10 @@ final class SettingsViewController: UIViewController {
                                       message: "How search results are ordered.",
                                       preferredStyle: .actionSheet)
         for order in SearchSortOrder.allCases {
-            let title = order == client.store.searchOptions.sortOrder ? "✓ \(order.displayName)" : order.displayName
+            let title = order == client.store.searchSortOrder ? "✓ \(order.displayName)" : order.displayName
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
-                guard let self else { return }
-                var options = self.client.store.searchOptions
-                options.sortOrder = order
-                self.client.store.searchOptions = options
-                self.rebuild()
+                self?.client.store.searchSortOrder = order
+                self?.rebuild()
             })
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
