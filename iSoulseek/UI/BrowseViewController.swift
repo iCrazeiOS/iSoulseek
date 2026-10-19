@@ -96,7 +96,9 @@ final class BrowseViewController: UIViewController {
             guard let self else { return }
             switch result {
             case .success(let folders):
-                self.folders = folders
+                self.folders = folders.sorted {
+                    $0.path.localizedStandardCompare($1.path) == .orderedAscending
+                }
                 self.hasLoaded = true
                 self.messageView.isHidden = true
                 self.rebuildSections()
