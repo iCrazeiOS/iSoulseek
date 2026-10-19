@@ -64,11 +64,11 @@ final class SearchViewController: UIViewController {
     private lazy var optionsItem = UIBarButtonItem(image: nil, style: .plain,
                                                    target: nil, action: nil)
     private lazy var browseItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(image: UIImage(systemName: "person.2.wave.2.fill"),
+        let item = UIBarButtonItem(image: UIImage(systemName: "person.wave.2.fill"),
                                    style: .plain,
                                    target: self,
                                    action: #selector(promptForUsername))
-        item.accessibilityLabel = "Browse user"
+        item.accessibilityLabel = "Search user"
         return item
     }()
 
