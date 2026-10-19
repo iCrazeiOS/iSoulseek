@@ -20,8 +20,9 @@ final class DownloadsViewController: UIViewController {
     private var transfers: [Transfer] = []
     private var completedFiles: [DownloadedFile] = []
     private var displayed: [Item] = []
-    private var reloadScheduled = false
     private var scanScheduled = false
+    private var isSwipingRow = false
+    private var rebuildDeferred = false
     private var scanGeneration = 0
     private var previewURL: URL?
     private var sortOrder: DownloadSortOrder = .newest
@@ -68,18 +69,19 @@ final class DownloadsViewController: UIViewController {
         configureLayout()
         updateSortItem()
         updateNavigation()
-        transfers = client.transfers().filter { $0.state.isActive }
-        rebuild()
 
         client.transferChanges
             .receive(on: DispatchQueue.main)
             .sink { [weak self] transfer in self?.merge(transfer) }
             .store(in: &cancellables)
+
+        reloadActiveTransfers()
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         updateNavigation()
+        reloadActiveTransfers()
         reloadCompletedFiles()
     }
 
@@ -139,28 +141,59 @@ final class DownloadsViewController: UIViewController {
     // MARK: Updates
 
     private func merge(_ transfer: Transfer) {
+        let existed = transfers.contains { $0.id == transfer.id }
+
         if transfer.state.isActive {
             if let index = transfers.firstIndex(where: { $0.id == transfer.id }) {
                 transfers[index] = transfer
+                if !showsCompleted { updateVisibleTransfer(transfer) }
+                return
+            }
+
+            transfers.append(transfer)
+            if showsCompleted {
+                refreshTabTitles()
             } else {
-                transfers.append(transfer)
+                rebuild()
             }
         } else {
             transfers.removeAll { $0.id == transfer.id }
+            if existed {
+                if showsCompleted {
+                    refreshTabTitles()
+                } else {
+                    rebuild()
+                }
+            }
         }
 
-        scheduleReload()
         if !transfer.isUpload && !transfer.state.isActive {
             scheduleCompletedFilesReload()
         }
     }
 
-    private func scheduleReload() {
-        guard !reloadScheduled else { return }
-        reloadScheduled = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            self?.reloadScheduled = false
-            self?.rebuild()
+    private func updateVisibleTransfer(_ transfer: Transfer) {
+        guard let row = displayed.firstIndex(where: { item in
+            guard case .transfer(let current) = item else { return false }
+            return current.id == transfer.id
+        }) else {
+            rebuild()
+            return
+        }
+
+        displayed[row] = .transfer(transfer)
+        let indexPath = IndexPath(row: row, section: 0)
+        guard tableView.indexPathsForVisibleRows?.contains(indexPath) == true,
+              let cell = tableView.cellForRow(at: indexPath) as? DownloadCell else { return }
+        cell.configure(with: transfer)
+    }
+
+    private func reloadActiveTransfers() {
+        transfers = client.transfers().filter { $0.state.isActive }
+        if showsCompleted {
+            refreshTabTitles()
+        } else {
+            rebuild()
         }
     }
 
@@ -183,24 +216,41 @@ final class DownloadsViewController: UIViewController {
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.scanGeneration == generation else { return }
                 self.completedFiles = files
-                self.rebuild()
+                if self.showsCompleted {
+                    self.rebuild()
+                } else {
+                    self.refreshTabTitles()
+                }
             }
         }
     }
 
     private func rebuild() {
+        guard !isSwipingRow else {
+            rebuildDeferred = true
+            return
+        }
+
         let active = transfers.filter { $0.state.isActive }
         let completed = visibleCompletedFiles(active: active)
         displayed = showsCompleted
             ? sortOrder.sorted(completed).map(Item.file)
             : active.map(Item.transfer)
 
-        let activeCount = active.count
-        tabControl.setTitle(activeCount > 0 ? "Downloading (\(activeCount))" : "Downloading", forSegmentAt: 0)
-        tabControl.setTitle(completed.isEmpty ? "Completed" : "Completed (\(completed.count))", forSegmentAt: 1)
-
+        setTabTitles(activeCount: active.count, completedCount: completed.count)
         tableView.reloadData()
         updateEmptyState()
+    }
+
+    private func refreshTabTitles() {
+        let active = transfers.filter { $0.state.isActive }
+        setTabTitles(activeCount: active.count,
+                     completedCount: visibleCompletedFiles(active: active).count)
+    }
+
+    private func setTabTitles(activeCount: Int, completedCount: Int) {
+        tabControl.setTitle(activeCount > 0 ? "Downloading (\(activeCount))" : "Downloading", forSegmentAt: 0)
+        tabControl.setTitle(completedCount > 0 ? "Completed (\(completedCount))" : "Completed", forSegmentAt: 1)
     }
 
     /// Files still being downloaded are not completed, even though a partial file exists on disk.
@@ -229,8 +279,12 @@ final class DownloadsViewController: UIViewController {
 
     @objc private func tabChanged() {
         updateNavigation()
-        rebuild()
-        if showsCompleted { reloadCompletedFiles() }
+        if showsCompleted {
+            rebuild()
+            reloadCompletedFiles()
+        } else {
+            reloadActiveTransfers()
+        }
     }
 
     @objc private func confirmDeleteAllDownloads() {
@@ -314,6 +368,17 @@ extension DownloadsViewController: UITableViewDelegate {
         presentPreview(for: file)
     }
 
+    func tableView(_ tableView: UITableView, willBeginEditingRowAt indexPath: IndexPath) {
+        isSwipingRow = true
+    }
+
+    func tableView(_ tableView: UITableView, didEndEditingRowAt indexPath: IndexPath?) {
+        isSwipingRow = false
+        guard rebuildDeferred else { return }
+        rebuildDeferred = false
+        rebuild()
+    }
+
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath)
     -> UISwipeActionsConfiguration? {
         switch displayed[indexPath.row] {
@@ -358,7 +423,9 @@ private final class DownloadCell: UITableViewCell {
 
     static let reuseIdentifier = "DownloadCell"
 
-    private let directionLabel = UILabel()
+    private static let iconConfiguration = UIImage.SymbolConfiguration(textStyle: .title3)
+
+    private let iconView = UIImageView()
     private let nameLabel = UILabel()
     private let statusLabel = UILabel()
     private let detailLabel = UILabel()
@@ -375,8 +442,9 @@ private final class DownloadCell: UITableViewCell {
     }
 
     func configure(with transfer: Transfer, showsChevron: Bool = false) {
-        directionLabel.text = transfer.isUpload ? "↑" : "↓"
-        directionLabel.textColor = transfer.isUpload ? .systemOrange : .systemBlue
+        iconView.image = UIImage(systemName: transfer.isUpload ? "arrow.up" : "arrow.down",
+                                 withConfiguration: Self.iconConfiguration)
+        iconView.tintColor = transfer.isUpload ? .systemOrange : .systemBlue
         nameLabel.text = transfer.localFilename
         statusLabel.text = "\(transfer.username) · \(transfer.state.description)"
         statusLabel.lineBreakMode = .byTruncatingTail
@@ -396,8 +464,9 @@ private final class DownloadCell: UITableViewCell {
     }
 
     func configure(with file: DownloadedFile, showsChevron: Bool = false) {
-        directionLabel.text = Theme.mediaSymbol(forExtension: file.url.pathExtension) ?? "doc"
-        directionLabel.textColor = .secondaryLabel
+        let symbol = Theme.mediaSymbol(forExtension: file.url.pathExtension) ?? "doc"
+        iconView.image = UIImage(systemName: symbol, withConfiguration: Self.iconConfiguration)
+        iconView.tintColor = .secondaryLabel
         nameLabel.text = file.name
         statusLabel.text = file.folder
         statusLabel.lineBreakMode = .byTruncatingMiddle
@@ -407,9 +476,9 @@ private final class DownloadCell: UITableViewCell {
     }
 
     private func setup() {
-        directionLabel.font = .preferredFont(forTextStyle: .title3)
-        directionLabel.adjustsFontForContentSizeCategory = true
-        directionLabel.setContentHuggingPriority(.required, for: .horizontal)
+        iconView.contentMode = .scaleAspectFit
+        iconView.setContentHuggingPriority(.required, for: .horizontal)
+        iconView.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         nameLabel.font = .preferredFont(forTextStyle: .subheadline)
         nameLabel.adjustsFontForContentSizeCategory = true
@@ -430,7 +499,7 @@ private final class DownloadCell: UITableViewCell {
         labels.axis = .vertical
         labels.spacing = 4
 
-        let row = UIStackView(arrangedSubviews: [directionLabel, labels])
+        let row = UIStackView(arrangedSubviews: [iconView, labels])
         row.axis = .horizontal
         row.alignment = .top
         row.spacing = 10
@@ -438,7 +507,8 @@ private final class DownloadCell: UITableViewCell {
         contentView.addSubview(row)
 
         NSLayoutConstraint.activate([
-            directionLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 18),
+            iconView.widthAnchor.constraint(equalToConstant: 20),
+            iconView.heightAnchor.constraint(equalToConstant: 20),
             row.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
             row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10),
             row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
