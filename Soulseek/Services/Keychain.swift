@@ -4,9 +4,10 @@ import Security
 /// Minimal Keychain wrapper. Credentials never touch UserDefaults or logs.
 enum Keychain {
 
-    private static let service = "org.soulseekkit.Soulseek"
+    static let defaultService = "org.soulseekkit.Soulseek"
 
-    static func setPassword(_ password: String, account: String) {
+    static func setPassword(_ password: String, account: String,
+                            service: String = defaultService) {
         guard !account.isEmpty else { return }
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -21,7 +22,7 @@ enum Keychain {
         SecItemAdd(query as CFDictionary, nil)
     }
 
-    static func password(account: String) -> String? {
+    static func password(account: String, service: String = defaultService) -> String? {
         guard !account.isEmpty else { return nil }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -39,7 +40,7 @@ enum Keychain {
         return password
     }
 
-    static func deletePassword(account: String) {
+    static func deletePassword(account: String, service: String = defaultService) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

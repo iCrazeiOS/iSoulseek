@@ -12,7 +12,7 @@ final class TransferManager {
     var shareSnapshot: ShareSnapshot = .empty
     var ownUsername = ""
     var maximumConcurrentUploads = 1
-    var negotiateTimeout: TimeInterval = 300
+    var negotiateTimeout: TimeInterval = 1800
     var uploadChunkSize = 64 * 1024
 
     // MARK: Wiring

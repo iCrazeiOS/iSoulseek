@@ -15,7 +15,16 @@ final class SessionStore {
     static let defaultServerPort: UInt16 = 2242
     static let defaultListeningPort: UInt16 = 2234
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
+    private let keychainService: String
+    private let documentsOverride: URL?
+
+    init(defaults: UserDefaults = .standard, keychainService: String = Keychain.defaultService,
+         documentsDirectory: URL? = nil) {
+        self.defaults = defaults
+        self.keychainService = keychainService
+        self.documentsOverride = documentsDirectory
+    }
 
     var username: String {
         get { defaults.string(forKey: Key.username) ?? "" }
@@ -23,8 +32,8 @@ final class SessionStore {
     }
 
     var password: String {
-        get { Keychain.password(account: username) ?? "" }
-        set { Keychain.setPassword(newValue, account: username) }
+        get { Keychain.password(account: username, service: keychainService) ?? "" }
+        set { Keychain.setPassword(newValue, account: username, service: keychainService) }
     }
 
     var serverHost: String {
@@ -52,7 +61,7 @@ final class SessionStore {
     // MARK: Files
 
     var documentsDirectory: URL {
-        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = documentsOverride ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         ensureDirectory(url)
         return url
     }

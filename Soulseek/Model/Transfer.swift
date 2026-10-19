@@ -17,8 +17,8 @@ enum TransferState: Equatable {
 
     var description: String {
         switch self {
-        case .queued(let place): return place > 0 ? "Queued (#\(place))" : "Queued"
-        case .negotiating: return "Waiting for peer"
+        case .queued(let place): return place > 0 ? "Queued (#\(place))" : "Queued by peer"
+        case .negotiating: return "Waiting for peer slot"
         case .transferring: return "Downloading"
         case .completed: return "Completed"
         case .failed(let reason): return "Failed: \(reason)"
