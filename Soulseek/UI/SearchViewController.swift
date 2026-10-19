@@ -39,18 +39,16 @@ final class SearchViewController: UIViewController {
     // MARK: Views
 
     private let tableView = UITableView(frame: .zero, style: .plain)
+
+    /// A plain search bar rather than `UISearchController`. Building against the iOS 27 SDK breaks
+    /// iOS-on-Mac ("Designed for iPad"): activating a navigation-item search controller runs
+    /// `_UISearchPresentationController`, which asks `UINavigationBar` for its default height and
+    /// reaches `UIScreen`'s scene bounds — now an unsupported focus path that throws
+    /// "Accessing the focus system through UIScreen is no longer supported." Keeping the search bar
+    /// in the content view sidesteps the presentation machinery entirely.
+    private let searchBar = UISearchBar()
     private let messageView = MessageView()
     private let statusLabel = UILabel()
-
-    private lazy var searchController: UISearchController = {
-        let controller = UISearchController(searchResultsController: nil)
-        controller.obscuresBackgroundDuringPresentation = false
-        controller.searchBar.placeholder = "Artist, album or file name"
-        controller.searchBar.autocapitalizationType = .none
-        controller.searchBar.autocorrectionType = .no
-        controller.searchBar.delegate = self
-        return controller
-    }()
 
     private lazy var dataSource: UITableViewDiffableDataSource<String, Item> = {
         UITableViewDiffableDataSource(tableView: tableView) { tableView, indexPath, item in
@@ -85,6 +83,7 @@ final class SearchViewController: UIViewController {
         view.backgroundColor = .systemBackground
         options = client.store.searchOptions
 
+        configureSearchBar()
         configureTable()
         configureNavigation()
         observeClient()
@@ -110,6 +109,17 @@ final class SearchViewController: UIViewController {
         navigationController?.setToolbarHidden(true, animated: animated)
     }
 
+    private func configureSearchBar() {
+        searchBar.translatesAutoresizingMaskIntoConstraints = false
+        searchBar.placeholder = "Artist, album or file name"
+        searchBar.autocapitalizationType = .none
+        searchBar.autocorrectionType = .no
+        searchBar.returnKeyType = .search
+        searchBar.searchBarStyle = .minimal
+        searchBar.delegate = self
+        view.addSubview(searchBar)
+    }
+
     private func configureTable() {
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.dataSource = dataSource
@@ -124,7 +134,11 @@ final class SearchViewController: UIViewController {
                            forHeaderFooterViewReuseIdentifier: SearchSectionHeader.reuseIdentifier)
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: view.topAnchor),
+            searchBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            searchBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            searchBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+
+            tableView.topAnchor.constraint(equalTo: searchBar.bottomAnchor),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -132,10 +146,6 @@ final class SearchViewController: UIViewController {
     }
 
     private func configureNavigation() {
-        navigationItem.searchController = searchController
-        navigationItem.hidesSearchBarWhenScrolling = false
-        definesPresentationContext = true
-
         navigationItem.leftBarButtonItem = optionsItem
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Browse user…", style: .plain,
                                                             target: self, action: #selector(promptForUsername))
@@ -472,6 +482,20 @@ extension SearchViewController: UISearchBarDelegate {
     func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
         searchBar.resignFirstResponder()
         startSearch(searchBar.text ?? "")
+    }
+
+    func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
+        searchBar.setShowsCancelButton(true, animated: true)
+    }
+
+    func searchBarTextDidEndEditing(_ searchBar: UISearchBar) {
+        searchBar.setShowsCancelButton(false, animated: true)
+    }
+
+    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.text = ""
+        searchBar.resignFirstResponder()
+        if let token = activeToken { client.cancelSearch(token) }
     }
 }
 

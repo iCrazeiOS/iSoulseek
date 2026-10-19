@@ -14,6 +14,15 @@ Written in Swift with UIKit. No third-party dependencies.
   anything below 15.0 (`the range of supported deployment target versions is 15.0 to 27.0.x`), so
   15.0 is the floor.
 
+### Note on the iOS 27 SDK running on a Mac
+
+Built with the iOS 27 SDK, an iOS app run on Apple Silicon ("Designed for iPad") crashes as soon as
+a search controller in the navigation bar is activated. Its presentation machinery asks
+`UINavigationBar` for a default height, which reaches `UIScreen`'s scene bounds — a focus path the
+SDK no longer allows — and throws *"Accessing the focus system through UIScreen is no longer
+supported."* The search screen therefore uses a plain `UISearchBar` in the content view instead of a
+`UISearchController`; see the comment in `SearchViewController`.
+
 ## Build and run
 
 ```sh
