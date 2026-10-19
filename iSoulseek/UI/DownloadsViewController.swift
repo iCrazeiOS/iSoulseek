@@ -22,8 +22,12 @@ final class DownloadsViewController: UIViewController {
         set { tabControl.selectedSegmentIndex = newValue ? 1 : 0 }
     }
 
-    private lazy var clearItem = UIBarButtonItem(title: "Clear", style: .plain,
-                                                 target: self, action: #selector(clearFinished))
+    private lazy var deleteItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(image: UIImage(systemName: "trash.fill"), style: .plain,
+                                   target: self, action: #selector(confirmDeleteAllDownloads))
+        item.accessibilityLabel = "Delete all downloads"
+        return item
+    }()
 
     private lazy var shareGesture = UILongPressGestureRecognizer(target: self,
                                                                  action: #selector(handleLongPress(_:)))
@@ -42,7 +46,7 @@ final class DownloadsViewController: UIViewController {
         super.viewDidLoad()
         title = "Downloads"
         view.backgroundColor = .systemBackground
-        navigationItem.rightBarButtonItem = clearItem
+        navigationItem.rightBarButtonItem = deleteItem
 
         configureLayout()
         transfers = client.transfers()
@@ -121,7 +125,6 @@ final class DownloadsViewController: UIViewController {
         tabControl.setTitle(finished.isEmpty ? "Completed" : "Completed (\(finished.count))", forSegmentAt: 1)
 
         tableView.reloadData()
-        clearItem.isEnabled = !finished.isEmpty
         updateEmptyState()
     }
 
@@ -144,8 +147,22 @@ final class DownloadsViewController: UIViewController {
         rebuild()
     }
 
-    @objc private func clearFinished() {
-        client.clearFinishedTransfers()
+    @objc private func confirmDeleteAllDownloads() {
+        let alert = UIAlertController(
+            title: "Delete all downloads?",
+            message: "Every downloaded file, including downloads in progress, will be removed from this device. "
+                + "This cannot be undone.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+            self?.deleteAllDownloads()
+        })
+        present(alert, animated: true)
+    }
+
+    private func deleteAllDownloads() {
+        client.deleteAllDownloads()
         transfers = client.transfers()
         rebuild()
     }

@@ -169,8 +169,35 @@ final class TransferManager {
         updateTransfer(id) { $0.state = .cancelled }
     }
 
-    func clearFinished() {
-        transfers.removeAll { !$0.state.isActive }
+    /// Removes every download and empties the downloads directory, including partial files.
+    func deleteAllDownloads() {
+        let usernames = Set(downloads.values.map { $0.username })
+
+        for download in downloads.values {
+            download.timeout?.cancel()
+            downloadConnections.removeValue(forKey: download.id)?.cancel()
+        }
+        let handles = Array(openHandles.values)
+        openHandles.removeAll()
+        downloads.removeAll()
+        downloadsByKey.removeAll()
+        peerTokenToDownload.removeAll()
+        progressMarks.removeAll()
+        transfers.removeAll { !$0.isUpload }
+
+        for username in usernames where !hasPendingWork(username: username) {
+            onUserWorkFinished?(username)
+        }
+
+        let root = downloadsDirectory.standardizedFileURL
+        ioQueue.async {
+            for handle in handles { handle.closeFile() }
+            let contents = (try? FileManager.default.contentsOfDirectory(
+                at: root, includingPropertiesForKeys: nil)) ?? []
+            for url in contents {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
     }
 
     /// Removes one finished transfer. A completed download's file is deleted when `deleteFile` is set;

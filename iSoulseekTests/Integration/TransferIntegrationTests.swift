@@ -143,6 +143,98 @@ final class TransferIntegrationTests: XCTestCase {
                       "the downloads root must be kept")
     }
 
+    /// Deleting downloads one at a time keeps shared folders until their last file is gone.
+    func testDeletingDownloadsOneByOneCleansFoldersWhenEmpty() {
+        let payload = makePayload(1024)
+        env.peer.downloadPayload = payload
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        var transfers: [Transfer] = []
+        let cancellable = env.client.transferChanges.sink { transfers.append($0) }
+        defer { cancellable.cancel() }
+
+        let firstFilename = "Artist\\Album\\one.bin"
+        let secondFilename = "Artist\\Album\\two.bin"
+        env.client.download(username: "MockPeer", filename: firstFilename, size: UInt64(payload.count))
+        assertEventually("first download never completed", timeout: 3) {
+            transfers.last(where: { $0.filename == firstFilename })?.state == .completed
+        }
+        env.client.download(username: "MockPeer", filename: secondFilename, size: UInt64(payload.count))
+        assertEventually("second download never completed", timeout: 3) {
+            transfers.last(where: { $0.filename == secondFilename })?.state == .completed
+        }
+
+        let first = env.downloadsDirectory.appendingPathComponent("Artist/Album/one.bin")
+        let second = env.downloadsDirectory.appendingPathComponent("Artist/Album/two.bin")
+        let album = env.downloadsDirectory.appendingPathComponent("Artist/Album")
+        let artist = env.downloadsDirectory.appendingPathComponent("Artist")
+
+        guard let firstID = transfers.first(where: { $0.filename == firstFilename })?.id,
+              let secondID = transfers.first(where: { $0.filename == secondFilename })?.id else {
+            return XCTFail("downloads were not recorded")
+        }
+
+        env.client.deleteTransfer(id: firstID, deleteFile: true)
+        assertEventually("first file was not deleted", timeout: 3) {
+            !FileManager.default.fileExists(atPath: first.path)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: album.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: artist.path))
+
+        env.client.deleteTransfer(id: secondID, deleteFile: true)
+        assertEventually("last file was not deleted", timeout: 3) {
+            !FileManager.default.fileExists(atPath: second.path)
+        }
+        assertEventually("empty folders were not cleaned up", timeout: 3) {
+            !FileManager.default.fileExists(atPath: album.path)
+                && !FileManager.default.fileExists(atPath: artist.path)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: env.downloadsDirectory.path),
+                      "the downloads root must be kept")
+    }
+
+    /// Deleting all downloads removes every file and clears their transfer entries.
+    func testDeletingAllDownloadsRemovesFiles() {
+        let payload = makePayload(2048)
+        env.peer.downloadPayload = payload
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        var transfers: [Transfer] = []
+        let cancellable = env.client.transferChanges.sink { transfers.append($0) }
+        defer { cancellable.cancel() }
+
+        env.client.download(username: "MockPeer", filename: "Music\\Album\\one.bin",
+                            size: UInt64(payload.count))
+        assertEventually("first download never completed", timeout: 3) {
+            transfers.last(where: { !$0.isUpload })?.state == .completed
+        }
+
+        env.client.download(username: "MockPeer", filename: "Music\\Album\\two.bin",
+                            size: UInt64(payload.count))
+        assertEventually("second download never completed", timeout: 3) {
+            transfers.filter { !$0.isUpload && $0.state == .completed }.count == 2
+        }
+
+        let first = env.downloadsDirectory.appendingPathComponent("Music/Album/one.bin")
+        let second = env.downloadsDirectory.appendingPathComponent("Music/Album/two.bin")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
+
+        env.client.deleteAllDownloads()
+
+        assertEventually("download files were not deleted", timeout: 3) {
+            !FileManager.default.fileExists(atPath: first.path)
+                && !FileManager.default.fileExists(atPath: second.path)
+        }
+        XCTAssertTrue(env.client.transfers().allSatisfy { $0.isUpload })
+        assertEventually("empty folders were not cleaned up", timeout: 3) {
+            !FileManager.default.fileExists(atPath: env.downloadsDirectory.appendingPathComponent("Music").path)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: env.downloadsDirectory.path),
+                      "the downloads root must be kept")
+    }
+
     // MARK: Upload
 
     func testUploadServesSharedFile() {
