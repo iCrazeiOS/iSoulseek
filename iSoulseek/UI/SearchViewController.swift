@@ -548,7 +548,7 @@ private final class SearchResultCell: UITableViewCell {
     }
 
     func configure(with result: SearchResult) {
-        titleLabel.text = result.file.name
+        titleLabel.text = result.file.displayName
         folderLabel.text = folderText(for: result)
         metaLabel.text = metaText(for: result)
         configureBadge(for: result)

@@ -64,6 +64,11 @@ final class ModelTests: XCTestCase {
         XCTAssertNil(ShareFile(name: "b", size: 0).bitrate)
     }
 
+    func testDisplayNameOmitsFolders() {
+        XCTAssertEqual(ShareFile(name: "Music\\Album\\song.mp3", size: 1).displayName, "song.mp3")
+        XCTAssertEqual(ShareFile(name: "song.mp3", size: 1).displayName, "song.mp3")
+    }
+
     func testTransferLocalFilenameAndProgress() {
         let transfer = Transfer(id: 1, username: "bob", filename: "Music\\Album\\song.mp3",
                                 size: 200, isUpload: false)

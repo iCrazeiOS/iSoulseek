@@ -19,6 +19,13 @@ struct ShareFile: Hashable {
 
     /// Length in seconds, when the peer supplied it.
     var duration: UInt32? { attributes[SearchAttribute.duration.rawValue] }
+
+    /// The file name on its own. Search results carry the full virtual path in `name`, while a
+    /// browse listing already separates the folder, so use this for labels that show the folder
+    /// somewhere else.
+    var displayName: String {
+        ShareFolder.components(of: name).last ?? name
+    }
 }
 
 /// A directory of a user's share.

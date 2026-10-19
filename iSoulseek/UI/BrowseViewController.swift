@@ -371,7 +371,7 @@ private final class BrowseFileCell: UITableViewCell {
     }
 
     func configure(with file: ShareFile) {
-        titleLabel.text = file.name
+        titleLabel.text = file.displayName
         icon.image = Theme.mediaSymbol(forExtension: file.fileExtension).flatMap(UIImage.init(systemName:))
         icon.isHidden = icon.image == nil
         metaLabel.text = metaText(for: file)
