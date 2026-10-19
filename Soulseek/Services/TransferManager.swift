@@ -230,9 +230,14 @@ final class TransferManager {
             let remainder = Data(header[(base + 4)...])
             header.removeAll()
 
-            guard let id = self.peerTokenToDownload[token], var download = self.downloads[id] else {
+            guard let id = self.peerTokenToDownload[token], let download = self.downloads[id] else {
                 connection.cancel()
                 return
+            }
+
+            // A peer that never states a size signals completion by closing the connection.
+            connection.onClosed = { [weak self] _ in
+                self?.completeDownload(id: id)
             }
 
             self.prepareDownloadFile(id: id, download: download) { handle in
@@ -254,8 +259,9 @@ final class TransferManager {
                     connection.onBytes?(remainder)
                 }
 
-                download.transferred = download.offset
-                self.downloads[id] = download
+                var current = download
+                current.transferred = download.offset
+                self.downloads[id] = current
                 self.updateTransfer(id) { $0.state = .transferring }
             }
         }
@@ -476,14 +482,33 @@ final class TransferManager {
             if expected > 0 && total >= expected {
                 try? handle.close()
                 self.queue.async {
-                    self.openHandles.removeValue(forKey: id)
-                    self.updateTransfer(id) { $0.state = .completed }
-                    self.onUserWorkFinished?(download.username)
+                    self.completeDownload(id: id)
                     connection.cancel()
                 }
                 return
             }
             self.queue.async { self.reportProgress(id: id) }
+        }
+    }
+
+    /// Marks a download finished and releases everything it held.
+    private func completeDownload(id: UInt32) {
+        guard let download = downloads[id] else { return }
+        let reachedEnd = download.expectedSize > 0
+            ? download.transferred >= download.expectedSize
+            : download.transferred > 0
+        guard reachedEnd else {
+            failDownload(username: download.username, filename: download.filename,
+                         reason: "Connection closed early")
+            return
+        }
+        downloads.removeValue(forKey: id)
+        download.timeout?.cancel()
+        downloadsByKey.removeValue(forKey: download.key)
+        openHandles.removeValue(forKey: id)?.closeFile()
+        updateTransfer(id) { $0.state = .completed }
+        if !hasPendingWork(username: download.username) {
+            onUserWorkFinished?(download.username)
         }
     }
 

@@ -81,7 +81,7 @@ A `success` field of `0` means the server closed the connection (ban) before sen
 | 28 | SetStatus | `u32 status` |
 | 32 | ServerPing | empty |
 | 35 | SharedFoldersFiles | `u32 dirs, u32 files` |
-| 36 | GetUserStats | send `string user`; recv `u32 avgSpeed, u32 uploads, u32 unknown, u32 files, u32 dirs` (note: no username) |
+| 36 | GetUserStats | send `string user`; recv `string user, u32 avgSpeed, u32 uploads, u32 unknown, u32 files, u32 dirs` |
 | 41 | Relogged | stop the session |
 | 69 | PrivilegedUsers | `u32 count, string[count]` — ignore |
 | 71 | HaveNoParent | `bool noParent` |

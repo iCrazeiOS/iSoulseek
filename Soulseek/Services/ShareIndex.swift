@@ -22,7 +22,7 @@ struct ShareSnapshot {
         urls[Self.normalise(path)]
     }
 
-    /// Folders whose path starts with `folder`, used to answer incremental browse requests.
+    /// The folder with exactly this path, used to answer incremental browse requests.
     func folders(matching folder: String) -> [ShareFolder] {
         let wanted = Self.normalise(folder)
         return folders.filter { Self.normalise($0.path) == wanted }

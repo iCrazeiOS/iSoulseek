@@ -70,6 +70,7 @@ final class SoulseekClient {
     private var shareSnapshot: ShareSnapshot = .empty
     private var port: UInt16 = 0
     private var ownUsername = ""
+    private var currentState: ConnectionState = .disconnected
     private var pingTimer: DispatchSourceTimer?
     private let tokenLock = NSLock()
     private var tokenCounter = UInt32.random(in: 1...(UInt32.max / 2))
@@ -227,7 +228,7 @@ final class SoulseekClient {
         connection.onClosed = { [weak self] reason in
             guard let self else { return }
             let wasFailed: Bool
-            if case .failed = self.stateChanges.value { wasFailed = true } else { wasFailed = false }
+            if case .failed = self.currentState { wasFailed = true } else { wasFailed = false }
             self.server = nil
             self.stopPing()
             self.closeAllSessions()
@@ -310,6 +311,8 @@ final class SoulseekClient {
 
     private func send(_ request: ServerRequest) {
         guard let server else { return }
+        // The server ignores sessions that send anything before Login, so enforce the handshake.
+        guard currentState.isLoggedIn || request.code == .login else { return }
         server.send(code: request.code.rawValue, payload: request.payload())
     }
 
@@ -320,7 +323,10 @@ final class SoulseekClient {
             guard let self else { return }
             self.port = port
             self.publish { self.listeningPort.send(port) }
-            self.send(.setWaitPort(port))
+            // SetWaitPort must never precede Login: it is re-sent once the session is authenticated.
+            if self.currentState.isLoggedIn {
+                self.send(.setWaitPort(port))
+            }
             self.reportSharesLocked()
         }
         listener.onFailure = { [weak self] reason in
@@ -370,6 +376,7 @@ final class SoulseekClient {
                 self.handleInboundPierce(connection: connection, token: token)
             }
         }
+        connection.start()
     }
 
     private func handleInboundPeerInit(connection: SocketConnection, username: String, type: String) {
@@ -492,6 +499,9 @@ final class SoulseekClient {
     }
 
     private func wire(_ session: PeerSession, key: String) {
+        session.onReady = { [weak self] in
+            self?.activate(session, key: key)
+        }
         session.onMessage = { [weak self] message in
             self?.handlePeer(message, from: session)
         }
@@ -686,6 +696,7 @@ final class SoulseekClient {
     }
 
     private func setState(_ state: ConnectionState) {
+        currentState = state
         publish { self.stateChanges.send(state) }
     }
 
