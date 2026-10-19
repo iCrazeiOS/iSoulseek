@@ -62,6 +62,7 @@ final class SoulseekClient {
     private var sessionRequests: [String: [(PeerSession?) -> Void]] = [:]
     private var sessionTimeouts: [String: DispatchWorkItem] = [:]
     private var pendingPierce: [UInt32: (username: String, created: Date)] = [:]
+    private var fileDialsInFlight: Set<String> = []
     private var addressCache: [String: (ip: String, port: UInt16, created: Date)] = [:]
     private var addressRequests: [String: [(String, UInt16) -> Void]] = [:]
     private var browseRequests: [String: (Result<[ShareFolder], Error>) -> Void] = [:]
@@ -260,6 +261,7 @@ final class SoulseekClient {
         searchResultCounts.removeAll()
         addressCache.removeAll()
         pendingPierce.removeAll()
+        fileDialsInFlight.removeAll()
         transferManager.reset()
         setState(.disconnected)
         if let reason {
@@ -426,7 +428,10 @@ final class SoulseekClient {
 
     private func handleInboundPierce(connection: SocketConnection, token: UInt32) {
         guard let pending = pendingPierce.removeValue(forKey: token) else {
-            connection.cancel()
+            // Not one of our pending peer sessions; it may be a downloader answering `ConnectToPeer`.
+            if !transferManager.adoptIndirectUploadConnection(connection, token: token) {
+                connection.cancel()
+            }
             return
         }
         let key = pending.username.lowercased()
@@ -446,7 +451,17 @@ final class SoulseekClient {
     }
 
     private func handleServerConnectToPeer(_ info: ConnectToPeerInfo) {
-        guard ConnectionType(rawValue: info.connectionType) == .peer else { return }
+        switch ConnectionType(rawValue: info.connectionType) {
+        case .peer:
+            handleServerPeerRequest(info)
+        case .fileTransfer:
+            dialFileConnection(info)
+        default:
+            break
+        }
+    }
+
+    private func handleServerPeerRequest(_ info: ConnectToPeerInfo) {
         guard !info.ip.isEmpty, info.ip != "0.0.0.0", info.port > 0 else { return }
         let key = info.username.lowercased()
         guard sessions[key] == nil else { return }
@@ -459,6 +474,33 @@ final class SoulseekClient {
                                   handshake: .pierceFireWall(token: info.token),
                                   label: "pierce:\(info.username)", queue: queue)
         wire(session, key: key)
+    }
+
+    /// An uploader that cannot reach our listening port asks us to dial it and push a file through.
+    private func dialFileConnection(_ info: ConnectToPeerInfo) {
+        guard !info.ip.isEmpty, info.ip != "0.0.0.0", info.port > 0 else { return }
+        guard info.username.lowercased() != ownUsername.lowercased() else { return }
+
+        let key = info.username.lowercased()
+        guard !fileDialsInFlight.contains(key) else { return }
+        guard transferManager.expectsFileConnection(username: info.username) else { return }
+        fileDialsInFlight.insert(key)
+
+        let connection = SocketConnection(host: info.ip, port: info.port, mode: .initChannel,
+                                          label: "file-download:\(info.username)", queue: queue)
+        connection.onReady = { [weak self, weak connection] in
+            guard let self, let connection else { return }
+            var payload = ByteWriter()
+            payload.write(info.token)
+            connection.send(initCode: InitCode.pierceFireWall.rawValue, payload: payload.data)
+            // Register the raw handler before switching, so a coalesced file token is not lost.
+            self.transferManager.handleFileConnection(connection)
+            connection.setMode(.raw)
+        }
+        connection.onClosed = { [weak self] _ in
+            self?.fileDialsInFlight.remove(key)
+        }
+        connection.start()
     }
 
     // MARK: Peer sessions
@@ -670,6 +712,12 @@ final class SoulseekClient {
         transferManager.addressProvider = { [weak self] username, completion in
             guard let self else { completion("", 0); return }
             self.resolveAddress(username: username, completion: completion)
+        }
+        transferManager.indirectUploadRequest = { [weak self] username in
+            guard let self, self.server != nil, self.currentState.isLoggedIn else { return 0 }
+            let token = self.allocateToken()
+            self.send(.connectToPeer(token: token, username: username, type: .fileTransfer))
+            return token
         }
     }
 

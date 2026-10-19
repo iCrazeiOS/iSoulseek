@@ -35,7 +35,7 @@ xcodebuild -project Soulseek.xcodeproj -scheme Soulseek \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
-This runs 130+ unit and integration tests, including an in-process mock Soulseek server and peer
+This runs 135+ unit and integration tests, including an in-process mock Soulseek server and peer
 that speak the real wire protocol. The two live tests are skipped unless you opt in:
 
 ```sh
@@ -122,6 +122,8 @@ implementations.
 - Search responses are only accepted for tokens this client issued, checked before the payload is
   inflated.
 - Inbound file connections are only served when their transfer token matches a transfer we requested
-  or accepted.
+  or accepted. The reverse indirect route is equally guarded: we dial a `ConnectToPeer` only for a
+  transfer we are actively awaiting, and adopt an inbound `PierceFireWall` only for a token we
+  registered.
 - No third-party code, no web views, no dynamically loaded code, no App Transport Security
   exceptions.

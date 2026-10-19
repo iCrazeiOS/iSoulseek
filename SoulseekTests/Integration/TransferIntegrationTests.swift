@@ -83,6 +83,31 @@ final class TransferIntegrationTests: XCTestCase {
         XCTAssertEqual((try? Data(contentsOf: destination)), payload)
     }
 
+    /// The uploader cannot reach our listener, so it asks the server to have us dial it instead.
+    func testDownloadCompletesViaIndirectConnection() {
+        let payload = makePayload(3000)
+        env.peer.downloadPayload = payload
+        env.peer.downloadViaIndirect = true
+        let filename = "Music\\indirect.bin"
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        var transfers: [Transfer] = []
+        let cancellable = env.client.transferChanges.sink { transfers.append($0) }
+        defer { cancellable.cancel() }
+
+        env.client.download(username: "MockPeer", filename: filename, size: UInt64(payload.count))
+
+        assertEventually("the client never dialled the peer back", timeout: 3) {
+            !env.peer.filePierceTokens.isEmpty
+        }
+        assertEventually("download never completed", timeout: 3) {
+            transfers.last(where: { !$0.isUpload })?.state == .completed
+        }
+
+        let destination = env.downloadsDirectory.appendingPathComponent("Music/indirect.bin")
+        XCTAssertEqual((try? Data(contentsOf: destination)), payload)
+    }
+
     // MARK: Upload
 
     func testUploadServesSharedFile() {
@@ -116,6 +141,32 @@ final class TransferIntegrationTests: XCTestCase {
         assertEventually("SendUploadSpeed was not reported", timeout: 3) {
             !env.server.uploadSpeeds.isEmpty
         }
+    }
+
+    /// The direct route is unreachable, so the client must ask the downloader to dial it back.
+    func testUploadServesSharedFileViaIndirectConnection() {
+        let payload = makePayload(2048)
+        let virtualPath = "Shared\\served-indirect.bin"
+        let sharedFile = env.shareDirectory.appendingPathComponent("served-indirect.bin")
+        try? payload.write(to: sharedFile)
+
+        // Report an unreachable address so the direct dial fails and the indirect path is used.
+        env.server.peerPortOverride = 1
+        env.peer.uploadExpectedSize = payload.count
+
+        XCTAssertTrue(env.connectAndWaitForLogin())
+        env.client.rescanShares()
+        assertEventually("share index was not scanned") { env.client.shares.value.fileCount == 1 }
+
+        env.peer.requestUpload(virtualPath: virtualPath)
+
+        assertEventually("the client never requested an indirect connection", timeout: 3) {
+            env.server.connectToPeerRequests.contains { $0.type == "F" }
+        }
+        assertEventually("the client did not stream the file bytes", timeout: 3) {
+            env.peer.receivedUploadBytes.count >= payload.count
+        }
+        XCTAssertEqual(env.peer.receivedUploadBytes, payload)
     }
 
     func testUploadDeniedForUnsharedFile() {

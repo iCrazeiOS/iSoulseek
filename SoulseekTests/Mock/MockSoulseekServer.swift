@@ -37,6 +37,9 @@ final class MockSoulseekServer {
     private var recordedLogins: [(username: String, password: String, major: UInt32, minor: UInt32)] = []
     private var recordedCodeOrder: [UInt32] = []
 
+    /// When set, the server reports this port for every user, so tests can break the direct route.
+    var peerPortOverride: UInt16?
+
     // MARK: Lifecycle
 
     func start() {
@@ -116,7 +119,9 @@ final class MockSoulseekServer {
 
         case 2: // SetWaitPort
             if let value = try? reader.u32() {
-                recordedSetWaitPorts.append(UInt16(truncatingIfNeeded: value))
+                let port = UInt16(truncatingIfNeeded: value)
+                recordedSetWaitPorts.append(port)
+                if port > 0 { peer?.clientPortHint = port }
             }
 
         case 71: // HaveNoParent
@@ -158,7 +163,11 @@ final class MockSoulseekServer {
                let user = try? reader.string(),
                let type = try? reader.string() {
                 recordedConnectToPeer.append((token, user, type))
-                peer?.dialPierce(token: token)
+                if type == "F" {
+                    peer?.dialFilePierce(token: token)
+                } else {
+                    peer?.dialPierce(token: token)
+                }
             }
 
         case 121: // SendUploadSpeed
@@ -187,12 +196,28 @@ final class MockSoulseekServer {
     }
 
     private func replyWithPeerAddress(for user: String, channel: MockChannel) {
-        guard let peer, peer.port > 0 else { return }
+        guard let peer, peer.port > 0 || peerPortOverride != nil else { return }
         var writer = MockWriter()
         writer.string(user)
         writer.ip("127.0.0.1")
-        writer.u32(UInt32(peer.port))
+        writer.u32(UInt32(peerPortOverride ?? peer.port))
         channel.send(code: 3, payload: writer.data)
+    }
+
+    /// Forwards an uploader's `ConnectToPeer` (type `F`) to the connected client, as the real server
+    /// does when a peer cannot reach the client's listening port directly.
+    func forwardConnectToPeer(from username: String, port: UInt16, token: UInt32) {
+        queue.async { [weak self] in
+            guard let self, let channel = self.channels.first else { return }
+            var writer = MockWriter()
+            writer.string(username)
+            writer.string("F")
+            writer.ip("127.0.0.1")
+            writer.u32(UInt32(port))
+            writer.u32(token)
+            writer.bool(false)
+            channel.send(code: 18, payload: writer.data)
+        }
     }
 
     private static func md5Hex(_ string: String) -> String {

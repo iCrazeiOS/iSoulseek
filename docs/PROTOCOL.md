@@ -112,6 +112,9 @@ Outbound peer setup (what this client does):
    to the peer so it can dial back with `PierceFireWall(token)` if our outbound dial fails.
 3. Keep `token → pending connection` so an inbound `PierceFireWall` can be matched and adopted.
 
+An inbound `ConnectToPeer` of type `F` means an uploader cannot reach our listening port; we dial the
+address the server gives and open with `PierceFireWall(token)` instead of `PeerInit`. See §6.
+
 ### Peer messages
 
 | Code | Name | Payload |
@@ -178,6 +181,11 @@ Defensive notes:
 5. The downloader closes the connection to signal completion. The uploader must not close first.
 6. `(51) PlaceInQueueRequest(filename)` → `(44) PlaceInQueueResponse(filename, place)` while queued.
 
+If the uploader cannot reach our listening port it sends `ConnectToPeer(token', us, "F")` to the
+server instead. The server forwards `ConnectToPeer(them, "F", token', ip, port)` to us; we dial that
+address, open with `PierceFireWall(token')`, and the uploader sends the bare `u32 token` just as in
+step 3. `token'` is a fresh indirect token, not the transfer token.
+
 ### Uploading (we are the uploader)
 
 1. Inbound `QueueUpload(filename)` (or legacy `TransferRequest(direction=0)`): if the file is in the
@@ -185,8 +193,11 @@ Defensive notes:
    free, otherwise `TransferResponse(token, false, "Queued")`.
 2. On `TransferResponse(token, true)` dial the requester with `PeerInit(ourUsername, "F", 0)`, send
    `u32 token`, read `u64 offset`, stream the file, then wait for the peer to close.
-3. Send `SendUploadSpeed(speed)` on the server connection afterwards.
-4. Denials/reasons: `Banned`, `Cancelled`, `Complete`, `File not shared.`, `File read error.`,
+3. In parallel send `ConnectToPeer(token', requester, "F")` so a blocked direct route can still
+   complete: the downloader answers by dialling us with `PierceFireWall(token')`, after which we send
+   `u32 token` and continue as above. Whichever route connects first is used; the other is dropped.
+4. Send `SendUploadSpeed(speed)` on the server connection afterwards.
+5. Denials/reasons: `Banned`, `Cancelled`, `Complete`, `File not shared.`, `File read error.`,
    `Pending shutdown.`, `Queued`, `Too many files`, `Too many megabytes`.
 
 ### File channel

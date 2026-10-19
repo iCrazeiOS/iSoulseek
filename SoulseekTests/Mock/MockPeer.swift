@@ -8,6 +8,9 @@ final class MockPeer {
 
     let queue = DispatchQueue(label: "mock.soulseek.peer")
     weak var server: MockSoulseekServer?
+    /// The client's listening port, cached from the server's `SetWaitPort` so the peer queue never
+    /// has to synchronise onto the server queue (which would risk a lock-order inversion).
+    var clientPortHint: UInt16 = 0
 
     var username = "MockPeer"
 
@@ -25,6 +28,8 @@ final class MockPeer {
     // Download configuration: bytes we serve when the client downloads from us.
     var downloadPayload = Data()
     var downloadToken: UInt32 = 0x0FFF_0001
+    /// When true, the mock refuses the direct route and makes the client dial it back instead.
+    var downloadViaIndirect = false
 
     // Upload configuration: how many bytes we expect to receive when the client uploads to us.
     var uploadExpectedSize = 0
@@ -48,6 +53,8 @@ final class MockPeer {
     private var _receivedUploadBytes = Data()
     private var recordedSearchTokens: [UInt32] = []
     private var recordedPierceTokens: [UInt32] = []
+    private var recordedFilePierceTokens: [UInt32] = []
+    private var pendingFilePierce: [UInt32: UInt32] = [:]
     private var recordedUserInfoResponses = 0
     private var _unsolicitedOffsetBytes = 0
     private var _unsolicitedClosed = false
@@ -91,6 +98,8 @@ final class MockPeer {
     var receivedUploadBytes: Data { queue.sync { _receivedUploadBytes } }
     var searchTokens: [UInt32] { queue.sync { recordedSearchTokens } }
     var pierceTokens: [UInt32] { queue.sync { recordedPierceTokens } }
+    /// Indirect file tokens the mock was asked to answer with a dial-back.
+    var filePierceTokens: [UInt32] { queue.sync { recordedFilePierceTokens } }
     var userInfoResponseCount: Int { queue.sync { recordedUserInfoResponses } }
 
     // MARK: Outbound (test/server driven)
@@ -134,6 +143,23 @@ final class MockPeer {
                 channel.send(initCode: 0, payload: payload.data)
                 channel.setMode(.peer)
                 self.wirePeer(channel, username: self.username)
+            }
+            channel.start()
+        }
+    }
+
+    /// Answers the client's `ConnectToPeer` (upload direction) by dialling it back with a `F` pierce.
+    func dialFilePierce(token: UInt32) {
+        queue.async { [weak self] in
+            guard let self, let port = self.clientPort() else { return }
+            self.recordedFilePierceTokens.append(token)
+            let channel = self.dial(port: port, label: "peer-file-pierce")
+            channel.onReady = { [weak self, weak channel] in
+                guard let self, let channel else { return }
+                var payload = MockWriter()
+                payload.u32(token)
+                channel.send(initCode: 0, payload: payload.data)
+                self.beginReceiveUpload(channel)
             }
             channel.start()
         }
@@ -243,9 +269,17 @@ final class MockPeer {
             }
 
         case 0: // PierceFireWall
-            _ = try? reader.u32()
-            channel.setMode(.peer)
-            wirePeer(channel, username: nil)
+            guard let token = try? reader.u32() else {
+                channel.cancel()
+                return
+            }
+            if let transferToken = pendingFilePierce.removeValue(forKey: token) {
+                recordedFilePierceTokens.append(token)
+                beginDownloadTransfer(channel, transferToken: transferToken)
+            } else {
+                channel.setMode(.peer)
+                wirePeer(channel, username: nil)
+            }
 
         default:
             channel.cancel()
@@ -296,7 +330,13 @@ final class MockPeer {
             var reason: String?
             if !allowed { reason = try? reader.string() }
             recordedTransferResponses.append((token, allowed, reason))
-            if allowed { openFileConnectionForUpload(token: token) }
+            if allowed {
+                if downloadViaIndirect {
+                    initiateIndirectDownload(transferToken: token)
+                } else {
+                    openFileConnectionForUpload(token: token)
+                }
+            }
 
         case 51: // PlaceInQueueRequest
             guard let filename = try? reader.string() else { return }
@@ -317,6 +357,14 @@ final class MockPeer {
         default:
             break
         }
+    }
+
+    /// We are the uploader: we cannot reach the client's listener, so we ask it to dial us back.
+    private func initiateIndirectDownload(transferToken: UInt32) {
+        let indirectToken = UInt32.random(in: 1...UInt32.max)
+        pendingFilePierce[indirectToken] = transferToken
+        // Already on `queue`, so read the stored port directly instead of the syncing accessor.
+        server?.forwardConnectToPeer(from: username, port: _port, token: indirectToken)
     }
 
     /// We are the uploader: dial the client's `F` listener, send the token, read the offset, stream.
@@ -356,6 +404,30 @@ final class MockPeer {
         channel.start()
     }
 
+    /// We are the uploader: the client dialled us back after `ConnectToPeer`, so push the file.
+    private func beginDownloadTransfer(_ channel: MockChannel, transferToken: UInt32) {
+        var header = Data()
+        var offsetDelivered = false
+        channel.onRaw = { [weak self, weak channel] data in
+            guard let self, let channel, !offsetDelivered else { return }
+            header.append(data)
+            guard header.count >= 8 else { return }
+            var reader = MockReader(header)
+            let offset = (try? reader.u64()) ?? 0
+            self._downloadAskedOffset = offset
+            offsetDelivered = true
+
+            let total = UInt64(self.downloadPayload.count)
+            let start = Int(min(offset, total))
+            channel.sendRaw(self.downloadPayload.subdata(in: start..<self.downloadPayload.count))
+        }
+        // The uploader speaks first on an `F` connection: the transfer token, then the file.
+        var tokenBytes = MockWriter()
+        tokenBytes.u32(transferToken)
+        channel.sendRaw(tokenBytes.data)
+        channel.setMode(.raw)
+    }
+
     /// We are the downloader: the client dialled our `F` listener to upload to us.
     private func beginReceiveUpload(_ channel: MockChannel) {
         var tokenSeen = false
@@ -382,6 +454,7 @@ final class MockPeer {
     // MARK: Helpers
 
     private func clientPort() -> UInt16? {
+        if clientPortHint > 0 { return clientPortHint }
         guard let server else { return nil }
         let port = server.clientListeningPort
         return port > 0 ? port : nil

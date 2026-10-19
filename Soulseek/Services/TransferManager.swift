@@ -13,6 +13,7 @@ final class TransferManager {
     var ownUsername = ""
     var maximumConcurrentUploads = 1
     var negotiateTimeout: TimeInterval = 1800
+    var uploadStartTimeout: TimeInterval = 60
     var uploadChunkSize = 64 * 1024
 
     // MARK: Wiring
@@ -22,6 +23,9 @@ final class TransferManager {
     /// Asks the client for a user's address, for outbound file connections.
     /// Calls back with an empty address when the user is offline.
     var addressProvider: ((String, @escaping (String, UInt16) -> Void) -> Void)?
+    /// Asks the client to send `ConnectToPeer` of type `F` and returns the token it used, or 0 when
+    /// the request could not be sent. The peer answers by dialling us back.
+    var indirectUploadRequest: ((String) -> UInt32)?
     var onUpdate: ((Transfer) -> Void)?
     var onUploadFinished: ((UInt64, TimeInterval) -> Void)?
     /// Called when nothing else is outstanding for a user, so the client can drop the peer session.
@@ -37,6 +41,8 @@ final class TransferManager {
         var offset: UInt64
         var transferred: UInt64
         var isStarted = false
+        /// Set once the peer has sent `TransferRequest`, i.e. a file connection may now arrive.
+        var awaitingFileConnection = false
         var timeout: DispatchWorkItem?
     }
 
@@ -49,6 +55,9 @@ final class TransferManager {
         let size: UInt64
         var session: PeerSession?
         var isWaitingForSlot = true
+        /// True once we have begun streaming over a file connection.
+        var isTransferring = false
+        var timeout: DispatchWorkItem?
     }
 
     private let queue: DispatchQueue
@@ -59,6 +68,7 @@ final class TransferManager {
     private var downloads: [UInt32: Download] = [:]
     private var downloadsByKey: [String: UInt32] = [:]
     private var peerTokenToDownload: [UInt32: UInt32] = [:]
+    private var downloadConnections: [UInt32: SocketConnection] = [:]
     private var openHandles: [UInt32: FileHandle] = [:]
     private var progressMarks: [UInt32: Date] = [:]
 
@@ -67,6 +77,7 @@ final class TransferManager {
     private var uploadQueue: [UInt32] = []
     private var activeUploads = 0
     private var uploadConnections: [UInt32: SocketConnection] = [:]
+    private var pendingUploadPierce: [UInt32: UInt32] = [:]
 
     init(queue: DispatchQueue, downloadsDirectory: URL, ioQueue: DispatchQueue = DispatchQueue(label: "org.soulseekkit.transfers.io")) {
         self.queue = queue
@@ -140,13 +151,16 @@ final class TransferManager {
         if let download = downloads.removeValue(forKey: id) {
             download.timeout?.cancel()
             downloadsByKey.removeValue(forKey: download.key)
+            downloadConnections.removeValue(forKey: id)?.cancel()
             openHandles.removeValue(forKey: id)?.closeFile()
             updateTransfer(id) { $0.state = .cancelled }
             return
         }
         if let upload = uploads.removeValue(forKey: id) {
+            upload.timeout?.cancel()
             uploadsByKey.removeValue(forKey: upload.key)
             uploadQueue.removeAll { $0 == id }
+            pendingUploadPierce = pendingUploadPierce.filter { $0.value != id }
             uploadConnections.removeValue(forKey: id)?.cancel()
             updateTransfer(id) { $0.state = .cancelled }
             pumpUploadQueue()
@@ -163,16 +177,22 @@ final class TransferManager {
         for (_, download) in downloads {
             download.timeout?.cancel()
         }
+        for (_, upload) in uploads {
+            upload.timeout?.cancel()
+        }
         for (_, handle) in openHandles { handle.closeFile() }
+        for (_, connection) in downloadConnections { connection.cancel() }
         for (_, connection) in uploadConnections { connection.cancel() }
         downloads.removeAll()
         downloadsByKey.removeAll()
         peerTokenToDownload.removeAll()
+        downloadConnections.removeAll()
         openHandles.removeAll()
         uploads.removeAll()
         uploadsByKey.removeAll()
         uploadQueue.removeAll()
         uploadConnections.removeAll()
+        pendingUploadPierce.removeAll()
         activeUploads = 0
         transfers.removeAll()
     }
@@ -207,16 +227,24 @@ final class TransferManager {
         guard let id = downloadsByKey[key], var download = downloads[id] else { return }
 
         peerTokenToDownload[info.token] = id
+        download.awaitingFileConnection = true
         if let size = info.size, size > 0 {
             download.expectedSize = size
-            downloads[id] = download
             updateTransfer(id) { $0.size = size }
         }
+        downloads[id] = download
         session.send(.transferResponse(TransferResponseInfo(token: info.token, isAllowed: true,
                                                             size: nil, reason: nil)))
     }
 
-    /// The uploader sends the token of its `TransferRequest` as the first bytes of a raw `F` stream.
+    /// Whether a download from this user is waiting for the uploader to push a file to us.
+    func expectsFileConnection(username: String) -> Bool {
+        let wanted = username.lowercased()
+        return downloads.values.contains { $0.username.lowercased() == wanted && $0.awaitingFileConnection }
+    }
+
+    /// The uploader sends the token of its `TransferRequest` as the first bytes of a raw `F` stream,
+    /// whether it dialled us (direct) or we dialled it after `ConnectToPeer` (indirect).
     func handleFileConnection(_ connection: SocketConnection) {
         var header = Data()
         connection.onBytes = { [weak self] data in
@@ -234,16 +262,24 @@ final class TransferManager {
                 connection.cancel()
                 return
             }
+            guard self.downloadConnections[id] == nil else {
+                // Both the direct and the indirect connection were established; use the first one.
+                connection.cancel()
+                return
+            }
+            self.downloadConnections[id] = connection
 
             // A peer that never states a size signals completion by closing the connection.
-            connection.onClosed = { [weak self] _ in
+            let previousOnClosed = connection.onClosed
+            connection.onClosed = { [weak self] reason in
+                previousOnClosed?(reason)
                 self?.completeDownload(id: id)
             }
 
             self.prepareDownloadFile(id: id, download: download) { handle in
                 guard let handle else {
-                    self.updateTransfer(id) { $0.state = .failed("Cannot write to disk") }
-                    connection.cancel()
+                    self.failDownload(username: download.username, filename: download.filename,
+                                      reason: "Cannot write to disk")
                     return
                 }
                 self.openHandles[id] = handle
@@ -261,6 +297,7 @@ final class TransferManager {
 
                 var current = download
                 current.transferred = download.offset
+                current.awaitingFileConnection = false
                 self.downloads[id] = current
                 self.updateTransfer(id) { $0.state = .transferring }
             }
@@ -321,7 +358,43 @@ final class TransferManager {
         }
         upload.session = session
         uploads[info.token] = upload
+
+        // Ask the peer to dial us back as well, so a blocked direct route does not stall the upload.
+        requestIndirectUpload(for: info.token)
+        scheduleUploadStartTimeout(info.token)
         openUploadConnection(for: info.token)
+    }
+
+    /// Registers an `F` dial-back with the server; the peer answers by connecting with `PierceFireWall`.
+    private func requestIndirectUpload(for id: UInt32) {
+        guard let upload = uploads[id], let request = indirectUploadRequest else { return }
+        let token = request(upload.username)
+        if token != 0 {
+            pendingUploadPierce[token] = id
+        }
+    }
+
+    /// Adopts a connection the downloader opened after our `ConnectToPeer`; returns false if the token
+    /// does not belong to one of our uploads.
+    @discardableResult
+    func adoptIndirectUploadConnection(_ connection: SocketConnection, token: UInt32) -> Bool {
+        guard let id = pendingUploadPierce.removeValue(forKey: token),
+              let upload = uploads[id], !upload.isWaitingForSlot else {
+            return false
+        }
+        if let existing = uploadConnections[id], !existing.isFinished {
+            guard !upload.isTransferring else {
+                connection.cancel()
+                return true
+            }
+            uploadConnections[id] = nil
+            existing.cancel()
+        }
+        uploadConnections[id] = connection
+        wireUploadConnection(id: id, connection: connection)
+        connection.setMode(.raw)
+        beginUploadTransfer(id: id, connection: connection)
+        return true
     }
 
     private func handlePlaceInQueueRequest(filename: String, from session: PeerSession) {
@@ -344,42 +417,67 @@ final class TransferManager {
         guard let upload = uploads[id] else { return }
         addressProvider?(upload.username) { [weak self] ip, port in
             guard let self else { return }
-            guard !ip.isEmpty, port > 0 else {
-                self.uploadConnections.removeValue(forKey: id)
-                self.failUpload(id, reason: "Peer is offline")
-                return
-            }
+            // An empty address rules out the direct route, but the indirect dial-back may still work.
+            guard !ip.isEmpty, port > 0 else { return }
+            guard let current = self.uploads[id], !current.isWaitingForSlot, !current.isTransferring else { return }
+            if let existing = self.uploadConnections[id], !existing.isFinished { return }
+
             let connection = SocketConnection(host: ip, port: port, mode: .initChannel,
                                               label: "file-upload", queue: self.queue)
             self.uploadConnections[id] = connection
-            connection.onReady = { [weak self] in
-                guard let self, let upload = self.uploads[id] else { return }
+            self.wireUploadConnection(id: id, connection: connection)
+            connection.onReady = { [weak self, weak connection] in
+                guard let self, let connection else { return }
+                guard self.uploadConnections[id] === connection, self.uploads[id] != nil else {
+                    connection.cancel()
+                    return
+                }
                 var initPayload = ByteWriter()
                 initPayload.write(string: self.ownUsername)
                 initPayload.write(string: ConnectionType.fileTransfer.rawValue)
                 initPayload.write(UInt32(0))
                 connection.send(initCode: InitCode.peerInit.rawValue, payload: initPayload.data)
                 connection.setMode(.raw)
-
-                var token = ByteWriter()
-                token.write(id)
-                connection.send(raw: token.data)
-                self.readUploadOffset(id: id, connection: connection, upload: upload)
+                self.beginUploadTransfer(id: id, connection: connection)
             }
-            connection.onClosed = { [weak self] reason in
-                guard let self, let upload = self.uploads[id], !upload.isWaitingForSlot else { return }
-                if self.transfers.first(where: { $0.id == id })?.state != .completed {
-                    self.updateTransfer(id) { $0.state = .failed(reason ?? "Connection closed by peer") }
-                }
-                self.teardownUpload(id)
-                self.uploadConnections.removeValue(forKey: id)
-            }
-            connection.onBytes = { _ in }
             connection.start()
         }
     }
 
-    private func readUploadOffset(id: UInt32, connection: SocketConnection, upload: PendingUpload) {
+    /// Tracks the connection that carries an upload; a failure only ends the transfer once the
+    /// connection was the active one, so a losing race between the direct and indirect routes is safe.
+    private func wireUploadConnection(id: UInt32, connection: SocketConnection) {
+        connection.onBytes = { _ in }
+        connection.onClosed = { [weak self, weak connection] reason in
+            guard let self, let connection, let upload = self.uploads[id],
+                  !upload.isWaitingForSlot, self.uploadConnections[id] === connection else { return }
+            self.uploadConnections.removeValue(forKey: id)
+            guard upload.isTransferring else { return }
+            if self.transfers.first(where: { $0.id == id })?.state != .completed {
+                self.updateTransfer(id) { $0.state = .failed(reason ?? "Connection closed by peer") }
+            }
+            self.teardownUpload(id)
+        }
+    }
+
+    /// Sends the `TransferRequest` token and waits for the downloader's offset. The connection must
+    /// already be in raw mode.
+    private func beginUploadTransfer(id: UInt32, connection: SocketConnection) {
+        guard var upload = uploads[id] else {
+            connection.cancel()
+            return
+        }
+        upload.isTransferring = true
+        upload.timeout?.cancel()
+        uploads[id] = upload
+
+        var token = ByteWriter()
+        token.write(id)
+        connection.send(raw: token.data)
+        readUploadOffset(id: id, connection: connection)
+    }
+
+    private func readUploadOffset(id: UInt32, connection: SocketConnection) {
         var header = Data()
         connection.onBytes = { [weak self] data in
             guard let self else { return }
@@ -393,12 +491,22 @@ final class TransferManager {
             connection.onBytes = { _ in }
             header.removeAll()
 
-            guard offset <= upload.size else {
+            guard let upload = self.uploads[id], offset <= upload.size else {
                 self.failUpload(id, reason: "Peer asked for an invalid offset")
                 return
             }
             self.startSending(id: id, connection: connection, offset: offset)
         }
+    }
+
+    private func scheduleUploadStartTimeout(_ id: UInt32) {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, let upload = self.uploads[id], !upload.isWaitingForSlot,
+                  !upload.isTransferring else { return }
+            self.failUpload(id, reason: "Peer did not answer")
+        }
+        uploads[id]?.timeout = work
+        queue.asyncAfter(deadline: .now() + uploadStartTimeout, execute: work)
     }
 
     private func startSending(id: UInt32, connection: SocketConnection, offset: UInt64) {
@@ -505,6 +613,7 @@ final class TransferManager {
         downloads.removeValue(forKey: id)
         download.timeout?.cancel()
         downloadsByKey.removeValue(forKey: download.key)
+        downloadConnections.removeValue(forKey: id)?.cancel()
         openHandles.removeValue(forKey: id)?.closeFile()
         updateTransfer(id) { $0.state = .completed }
         if !hasPendingWork(username: download.username) {
@@ -544,6 +653,7 @@ final class TransferManager {
         guard let id = downloadsByKey[key] else { return }
         downloads.removeValue(forKey: id)
         downloadsByKey.removeValue(forKey: key)
+        downloadConnections.removeValue(forKey: id)?.cancel()
         openHandles.removeValue(forKey: id)?.closeFile()
         updateTransfer(id) { $0.state = .failed(reason.isEmpty ? "Refused" : reason) }
         if !hasPendingWork(username: username) {
@@ -566,13 +676,16 @@ final class TransferManager {
     private func failUpload(_ id: UInt32, reason: String) {
         guard uploads[id] != nil else { return }
         updateTransfer(id) { $0.state = .failed(reason) }
-        uploadConnections.removeValue(forKey: id)?.cancel()
+        let connection = uploadConnections.removeValue(forKey: id)
         teardownUpload(id)
+        connection?.cancel()
     }
 
     /// Releases an upload's slot and queue entry. Safe to call more than once.
     private func teardownUpload(_ id: UInt32) {
         guard let upload = uploads.removeValue(forKey: id) else { return }
+        upload.timeout?.cancel()
+        pendingUploadPierce = pendingUploadPierce.filter { $0.value != id }
         uploadsByKey.removeValue(forKey: upload.key)
         uploadQueue.removeAll { $0 == id }
         if !upload.isWaitingForSlot {
