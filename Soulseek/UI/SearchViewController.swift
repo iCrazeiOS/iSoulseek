@@ -30,9 +30,11 @@ final class SearchViewController: UIViewController {
     private var flushWorkItem: DispatchWorkItem?
     private var nextItemID = 0
     private var displayedCount = 0
+    private var visibleCount = 0
     private var isCapped = false
     private var hasSearched = false
     private var activeToken: UInt32?
+    private var options = SearchOptions()
 
     // MARK: Views
 
@@ -62,6 +64,8 @@ final class SearchViewController: UIViewController {
     private lazy var statusItem = UIBarButtonItem(customView: statusLabel)
     private lazy var cancelItem = UIBarButtonItem(title: "Cancel", style: .plain,
                                                   target: self, action: #selector(cancelSearch))
+    private lazy var optionsItem = UIBarButtonItem(image: nil, style: .plain,
+                                                   target: nil, action: nil)
 
     init(client: SoulseekClient) {
         self.client = client
@@ -79,10 +83,12 @@ final class SearchViewController: UIViewController {
         super.viewDidLoad()
         title = "Search"
         view.backgroundColor = .systemBackground
+        options = client.store.searchOptions
 
         configureTable()
         configureNavigation()
         observeClient()
+        updateOptionsMenu()
         updateBackground()
         updateToolbar()
     }
@@ -90,6 +96,13 @@ final class SearchViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.setToolbarHidden(false, animated: animated)
+        // Pick up changes made from Settings while this tab was away.
+        let stored = client.store.searchOptions
+        if stored != options {
+            options = stored
+            updateOptionsMenu()
+            applySnapshot()
+        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -123,6 +136,7 @@ final class SearchViewController: UIViewController {
         navigationItem.hidesSearchBarWhenScrolling = false
         definesPresentationContext = true
 
+        navigationItem.leftBarButtonItem = optionsItem
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Browse user…", style: .plain,
                                                             target: self, action: #selector(promptForUsername))
 
@@ -242,26 +256,61 @@ final class SearchViewController: UIViewController {
     }
 
     private func applySnapshot() {
-        var snapshot = NSDiffableDataSourceSnapshot<String, Item>()
-        snapshot.appendSections(order)
+        // Filter and order each user's results, then order the sections themselves.
+        var visible: [String: [Item]] = [:]
         for key in order {
-            if let section = sectionsByKey[key] {
-                snapshot.appendItems(section.items, toSection: key)
+            guard let section = sectionsByKey[key] else { continue }
+            let filtered = section.items.filter(passesFilter)
+            guard !filtered.isEmpty else { continue }
+            visible[key] = sorted(filtered)
+        }
+
+        var keys = order.filter { visible[$0] != nil }
+        if options.sortOrder != .arrival {
+            keys.sort { lhs, rhs in
+                guard let left = visible[lhs]?.first, let right = visible[rhs]?.first else { return false }
+                if options.isOrderedBefore(left.result, right.result) { return true }
+                if options.isOrderedBefore(right.result, left.result) { return false }
+                return left.id < right.id
             }
         }
+
+        var snapshot = NSDiffableDataSourceSnapshot<String, Item>()
+        snapshot.appendSections(keys)
+        for key in keys {
+            snapshot.appendItems(visible[key] ?? [], toSection: key)
+        }
+
+        visibleCount = keys.reduce(0) { $0 + (visible[$1]?.count ?? 0) }
         dataSource.apply(snapshot, animatingDifferences: false)
         updateBackground()
         updateToolbar()
     }
 
+    private func passesFilter(_ item: Item) -> Bool {
+        options.allows(item.result)
+    }
+
+    private func sorted(_ items: [Item]) -> [Item] {
+        guard options.sortOrder != .arrival else { return items }
+        return items.sorted { lhs, rhs in
+            if options.isOrderedBefore(lhs.result, rhs.result) { return true }
+            if options.isOrderedBefore(rhs.result, lhs.result) { return false }
+            return lhs.id < rhs.id
+        }
+    }
+
     private func updateBackground() {
-        let total = order.reduce(0) { $0 + (sectionsByKey[$1]?.items.count ?? 0) }
-        guard total == 0 else {
+        let rawCount = order.reduce(0) { $0 + (sectionsByKey[$1]?.items.count ?? 0) }
+        guard visibleCount == 0 else {
             tableView.backgroundView = nil
             return
         }
         if activeToken != nil {
             messageView.configure(title: "Searching…", message: "Results appear as peers respond.", loading: true)
+        } else if hasSearched && rawCount > 0 {
+            messageView.configure(title: "No matches",
+                                  message: "Every result was hidden by your filter.")
         } else if hasSearched {
             messageView.configure(title: "No results",
                                   message: "Try different words, or browse a specific user.")
@@ -275,12 +324,14 @@ final class SearchViewController: UIViewController {
     private func updateToolbar() {
         if activeToken != nil {
             statusLabel.text = isCapped
-                ? "Searching… \(displayedCount.formatted()) results (capped)"
-                : "Searching… \(displayedCount.formatted()) results"
-        } else if displayedCount > 0 {
+                ? "Searching… \(visibleCount.formatted()) shown (capped)"
+                : "Searching… \(visibleCount.formatted()) shown"
+        } else if visibleCount > 0 {
             statusLabel.text = isCapped
-                ? "\(displayedCount.formatted()) results (showing first \(Self.maximumResults.formatted()))"
-                : "\(displayedCount.formatted()) results"
+                ? "\(visibleCount.formatted()) shown (first \(Self.maximumResults.formatted()))"
+                : "\(visibleCount.formatted()) results"
+        } else if displayedCount > 0 {
+            statusLabel.text = "No matches"
         } else {
             statusLabel.text = "Search the network"
         }
@@ -288,6 +339,42 @@ final class SearchViewController: UIViewController {
         var items: [UIBarButtonItem] = [statusItem, .flexibleSpace()]
         if activeToken != nil { items.append(cancelItem) }
         setToolbarItems(items, animated: false)
+    }
+
+    // MARK: Options
+
+    private func updateOptionsMenu() {
+        let active = options.onlyFreeSlots || options.sortOrder != .arrival
+        optionsItem.image = UIImage(systemName: active
+            ? "line.3.horizontal.decrease.circle.fill"
+            : "line.3.horizontal.decrease.circle")
+        optionsItem.accessibilityLabel = "Filter and sort"
+        optionsItem.menu = buildOptionsMenu()
+    }
+
+    private func buildOptionsMenu() -> UIMenu {
+        let sortActions = SearchSortOrder.allCases.map { order in
+            UIAction(title: order.displayName, state: options.sortOrder == order ? .on : .off) { [weak self] _ in
+                self?.setOptions { $0.sortOrder = order }
+            }
+        }
+        let sortMenu = UIMenu(title: "Sort by", options: .displayInline, children: sortActions)
+
+        let filterActions = [
+            UIAction(title: "Only free slots", state: options.onlyFreeSlots ? .on : .off) { [weak self] _ in
+                self?.setOptions { $0.onlyFreeSlots.toggle() }
+            },
+        ]
+        let filterMenu = UIMenu(title: "Filter", options: .displayInline, children: filterActions)
+
+        return UIMenu(children: [sortMenu, filterMenu])
+    }
+
+    private func setOptions(_ mutate: (inout SearchOptions) -> Void) {
+        mutate(&options)
+        client.store.searchOptions = options
+        updateOptionsMenu()
+        applySnapshot()
     }
 
     // MARK: Actions

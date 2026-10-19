@@ -50,6 +50,49 @@ struct SearchResult: Hashable {
     var fullPath: String { file.name }
 }
 
+/// Ordering applied to the results in a search.
+enum SearchSortOrder: Int, CaseIterable {
+    case arrival
+    case largest
+    case smallest
+    case bitrate
+    case duration
+
+    var displayName: String {
+        switch self {
+        case .arrival: return "Default"
+        case .largest: return "Largest first"
+        case .smallest: return "Smallest first"
+        case .bitrate: return "Highest bitrate"
+        case .duration: return "Longest"
+        }
+    }
+}
+
+/// Filters and ordering applied to search results, persisted between launches.
+struct SearchOptions: Equatable {
+    /// Hide results that cannot be downloaded right away (the peer has no free slot).
+    var onlyFreeSlots = false
+    var sortOrder: SearchSortOrder = .arrival
+
+    /// Whether a result passes the active filters.
+    func allows(_ result: SearchResult) -> Bool {
+        guard onlyFreeSlots else { return true }
+        return result.isSlotFree
+    }
+
+    /// Strict ordering between two results; returns false both ways when they are equal.
+    func isOrderedBefore(_ lhs: SearchResult, _ rhs: SearchResult) -> Bool {
+        switch sortOrder {
+        case .arrival: return false
+        case .largest: return lhs.file.size > rhs.file.size
+        case .smallest: return lhs.file.size < rhs.file.size
+        case .bitrate: return (lhs.file.bitrate ?? 0) > (rhs.file.bitrate ?? 0)
+        case .duration: return (lhs.file.duration ?? 0) > (rhs.file.duration ?? 0)
+        }
+    }
+}
+
 /// What we know about another user.
 struct UserStatusInfo: Hashable {
     var username: String
