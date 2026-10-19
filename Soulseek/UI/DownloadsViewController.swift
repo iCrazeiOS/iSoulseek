@@ -1,20 +1,26 @@
 import Combine
 import UIKit
 
-/// Live list of downloads and uploads, split into active and finished sections.
+/// Transfers, split into a "Downloading" tab (active) and a "Completed" tab (finished).
 final class DownloadsViewController: UIViewController {
 
     private let client: SoulseekClient
     private var cancellables = Set<AnyCancellable>()
 
+    private let tabControl = UISegmentedControl(items: ["Downloading", "Completed"])
     private let tableView = UITableView(frame: .zero, style: .plain)
     private let messageView = MessageView()
 
     private var transfers: [Transfer] = []
-    private var sections: [(title: String, transfers: [Transfer])] = []
+    private var displayed: [Transfer] = []
     private var reloadScheduled = false
 
-    private lazy var clearItem = UIBarButtonItem(title: "Clear finished", style: .plain,
+    private var showsCompleted: Bool {
+        get { tabControl.selectedSegmentIndex == 1 }
+        set { tabControl.selectedSegmentIndex = newValue ? 1 : 0 }
+    }
+
+    private lazy var clearItem = UIBarButtonItem(title: "Clear", style: .plain,
                                                  target: self, action: #selector(clearFinished))
 
     init(client: SoulseekClient) {
@@ -33,7 +39,7 @@ final class DownloadsViewController: UIViewController {
         view.backgroundColor = .systemBackground
         navigationItem.rightBarButtonItem = clearItem
 
-        configureTable()
+        configureLayout()
         transfers = client.transfers()
         rebuild()
 
@@ -48,25 +54,36 @@ final class DownloadsViewController: UIViewController {
         navigationController?.setToolbarHidden(true, animated: animated)
     }
 
-    private func configureTable() {
+    private func configureLayout() {
+        tabControl.selectedSegmentIndex = 0
+        tabControl.addTarget(self, action: #selector(tabChanged), for: .valueChanged)
+        tabControl.translatesAutoresizingMaskIntoConstraints = false
+
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.dataSource = self
         tableView.delegate = self
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 84
         tableView.register(TransferCell.self, forCellReuseIdentifier: TransferCell.reuseIdentifier)
-        view.addSubview(tableView)
 
         messageView.translatesAutoresizingMaskIntoConstraints = false
+
+        view.addSubview(tabControl)
+        view.addSubview(tableView)
         view.addSubview(messageView)
 
+        let guide = view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: view.topAnchor),
+            tabControl.topAnchor.constraint(equalTo: guide.topAnchor, constant: 8),
+            tabControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            tabControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+
+            tableView.topAnchor.constraint(equalTo: tabControl.bottomAnchor, constant: 8),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-            messageView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            messageView.topAnchor.constraint(equalTo: tableView.topAnchor),
             messageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             messageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             messageView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
@@ -95,11 +112,12 @@ final class DownloadsViewController: UIViewController {
 
     private func rebuild() {
         let active = transfers.filter { $0.state.isActive }
-        let finished = transfers.filter { !$0.state.isActive }.reversed()
+        let finished = Array(transfers.filter { !$0.state.isActive }.reversed())
+        displayed = showsCompleted ? finished : active
 
-        sections = []
-        if !active.isEmpty { sections.append(("Active", active)) }
-        if !finished.isEmpty { sections.append(("Finished", Array(finished))) }
+        let activeCount = active.count
+        tabControl.setTitle(activeCount > 0 ? "Downloading (\(activeCount))" : "Downloading", forSegmentAt: 0)
+        tabControl.setTitle(finished.isEmpty ? "Completed" : "Completed (\(finished.count))", forSegmentAt: 1)
 
         tableView.reloadData()
         clearItem.isEnabled = !finished.isEmpty
@@ -107,13 +125,22 @@ final class DownloadsViewController: UIViewController {
     }
 
     private func updateEmptyState() {
-        guard transfers.isEmpty else {
+        guard displayed.isEmpty else {
             messageView.isHidden = true
             return
         }
         messageView.isHidden = false
-        messageView.configure(title: "No transfers",
-                             message: "Files you download appear here, along with anything other users take from your share.")
+        if showsCompleted {
+            messageView.configure(title: "No completed transfers",
+                                 message: "Finished downloads and uploads appear here.")
+        } else {
+            messageView.configure(title: "No active transfers",
+                                 message: "Files you download appear here, along with anything other users take from your share.")
+        }
+    }
+
+    @objc private func tabChanged() {
+        rebuild()
     }
 
     @objc private func clearFinished() {
@@ -127,21 +154,13 @@ final class DownloadsViewController: UIViewController {
 
 extension DownloadsViewController: UITableViewDataSource {
 
-    func numberOfSections(in tableView: UITableView) -> Int {
-        sections.count
-    }
-
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        sections[section].transfers.count
-    }
-
-    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        sections[section].title
+        displayed.count
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: TransferCell.reuseIdentifier, for: indexPath)
-        (cell as? TransferCell)?.configure(with: sections[indexPath.section].transfers[indexPath.row])
+        (cell as? TransferCell)?.configure(with: displayed[indexPath.row])
         return cell
     }
 }
@@ -152,7 +171,7 @@ extension DownloadsViewController: UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath)
     -> UISwipeActionsConfiguration? {
-        let transfer = sections[indexPath.section].transfers[indexPath.row]
+        let transfer = displayed[indexPath.row]
         guard transfer.state.isActive else { return nil }
 
         let action = UIContextualAction(style: .destructive, title: "Cancel") { [weak self] _, _, completion in
