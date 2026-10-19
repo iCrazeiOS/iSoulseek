@@ -3,24 +3,14 @@ import XCTest
 
 final class SearchOptionsTests: XCTestCase {
 
-    private func result(size: UInt64, bitrate: UInt32? = nil, duration: UInt32? = nil,
-                        slotFree: Bool = true) -> SearchResult {
+    private func result(size: UInt64, bitrate: UInt32? = nil,
+                        duration: UInt32? = nil) -> SearchResult {
         var attributes: [UInt32: UInt32] = [:]
         if let bitrate { attributes[SearchAttribute.bitrate.rawValue] = bitrate }
         if let duration { attributes[SearchAttribute.duration.rawValue] = duration }
         return SearchResult(username: "u", token: 1,
                             file: ShareFile(name: "a.bin", size: size, attributes: attributes),
-                            isSlotFree: slotFree, averageSpeed: 0, queueLength: 0)
-    }
-
-    func testFreeSlotFilter() {
-        var options = SearchOptions()
-        XCTAssertTrue(options.allows(result(size: 1, slotFree: false)),
-                      "with no filter every result is allowed")
-
-        options.onlyFreeSlots = true
-        XCTAssertTrue(options.allows(result(size: 1, slotFree: true)))
-        XCTAssertFalse(options.allows(result(size: 1, slotFree: false)))
+                            isSlotFree: true, averageSpeed: 0, queueLength: 0)
     }
 
     func testArrivalNeverReorders() {
@@ -56,13 +46,10 @@ final class SearchOptionsTests: XCTestCase {
         defer { UserDefaults().removePersistentDomain(forName: suite) }
 
         let store = SessionStore(defaults: defaults, keychainService: "test.\(suite)")
-        XCTAssertEqual(store.searchOptions, SearchOptions(), "defaults are unfiltered and unordered")
+        XCTAssertEqual(store.searchOptions, SearchOptions(), "defaults to arrival ordering")
 
-        store.searchOptions = SearchOptions(onlyFreeSlots: true, sortOrder: .largest)
-        XCTAssertEqual(defaults.bool(forKey: "searchOnlyFreeSlots"), true)
-        XCTAssertEqual(SearchOptions(
-            onlyFreeSlots: defaults.bool(forKey: "searchOnlyFreeSlots"),
-            sortOrder: SearchSortOrder(rawValue: defaults.integer(forKey: "searchSortOrder")) ?? .arrival
-        ), store.searchOptions)
+        store.searchOptions = SearchOptions(sortOrder: .largest)
+        XCTAssertEqual(defaults.integer(forKey: "searchSortOrder"), SearchSortOrder.largest.rawValue)
+        XCTAssertEqual(store.searchOptions, SearchOptions(sortOrder: .largest))
     }
 }

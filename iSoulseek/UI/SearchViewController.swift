@@ -274,13 +274,11 @@ final class SearchViewController: UIViewController {
     }
 
     private func applySnapshot() {
-        // Filter and order each user's results, then order the sections themselves.
+        // Order each user's results, then order the sections themselves.
         var visible: [String: [Item]] = [:]
         for key in order {
             guard let section = sectionsByKey[key] else { continue }
-            let filtered = section.items.filter(passesFilter)
-            guard !filtered.isEmpty else { continue }
-            visible[key] = sorted(filtered)
+            visible[key] = sorted(section.items)
         }
 
         var keys = order.filter { visible[$0] != nil }
@@ -305,10 +303,6 @@ final class SearchViewController: UIViewController {
         updateStatus()
     }
 
-    private func passesFilter(_ item: Item) -> Bool {
-        options.allows(item.result)
-    }
-
     private func sorted(_ items: [Item]) -> [Item] {
         guard options.sortOrder != .arrival else { return items }
         return items.sorted { lhs, rhs in
@@ -319,16 +313,12 @@ final class SearchViewController: UIViewController {
     }
 
     private func updateBackground() {
-        let rawCount = order.reduce(0) { $0 + (sectionsByKey[$1]?.items.count ?? 0) }
         guard visibleCount == 0 else {
             tableView.backgroundView = nil
             return
         }
         if activeToken != nil {
             messageView.configure(title: "Searching…", message: "Results appear as peers respond.", loading: true)
-        } else if hasSearched && rawCount > 0 {
-            messageView.configure(title: "No matches",
-                                  message: "Every result was hidden by your filter.")
         } else if hasSearched {
             messageView.configure(title: "No results",
                                   message: "Try different words, or browse a specific user.")
@@ -349,8 +339,6 @@ final class SearchViewController: UIViewController {
             text = isCapped
                 ? "\(visibleCount.formatted()) shown (first \(Self.maximumResults.formatted()))"
                 : "\(visibleCount.formatted()) results"
-        } else if displayedCount > 0 {
-            text = "No matches"
         } else {
             text = nil
         }
@@ -372,30 +360,13 @@ final class SearchViewController: UIViewController {
     // MARK: Options
 
     private func updateOptionsMenu() {
-        let active = options.onlyFreeSlots || options.sortOrder != .arrival
-        optionsItem.image = UIImage(systemName: active
-            ? "line.3.horizontal.decrease.circle.fill"
-            : "line.3.horizontal.decrease.circle")
-        optionsItem.accessibilityLabel = "Filter and sort"
-        optionsItem.menu = buildOptionsMenu()
-    }
-
-    private func buildOptionsMenu() -> UIMenu {
-        let sortActions = SearchSortOrder.allCases.map { order in
+        optionsItem.image = UIImage(systemName: "arrow.up.arrow.down")
+        optionsItem.accessibilityLabel = "Sort results"
+        optionsItem.menu = UIMenu(children: SearchSortOrder.allCases.map { order in
             UIAction(title: order.displayName, state: options.sortOrder == order ? .on : .off) { [weak self] _ in
                 self?.setOptions { $0.sortOrder = order }
             }
-        }
-        let sortMenu = UIMenu(title: "Sort by", options: .displayInline, children: sortActions)
-
-        let filterActions = [
-            UIAction(title: "Only free slots", state: options.onlyFreeSlots ? .on : .off) { [weak self] _ in
-                self?.setOptions { $0.onlyFreeSlots.toggle() }
-            },
-        ]
-        let filterMenu = UIMenu(title: "Filter", options: .displayInline, children: filterActions)
-
-        return UIMenu(children: [sortMenu, filterMenu])
+        })
     }
 
     private func setOptions(_ mutate: (inout SearchOptions) -> Void) {

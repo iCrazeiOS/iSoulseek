@@ -74,17 +74,9 @@ enum SearchSortOrder: Int, CaseIterable {
     }
 }
 
-/// Filters and ordering applied to search results, persisted between launches.
+/// Ordering applied to search results, persisted between launches.
 struct SearchOptions: Equatable {
-    /// Hide results that cannot be downloaded right away (the peer has no free slot).
-    var onlyFreeSlots = false
     var sortOrder: SearchSortOrder = .arrival
-
-    /// Whether a result passes the active filters.
-    func allows(_ result: SearchResult) -> Bool {
-        guard onlyFreeSlots else { return true }
-        return result.isSlotFree
-    }
 
     /// Strict ordering between two results; returns false both ways when they are equal.
     func isOrderedBefore(_ lhs: SearchResult, _ rhs: SearchResult) -> Bool {

@@ -9,7 +9,6 @@ final class SessionStore {
         static let serverPort = "serverPort"
         static let listeningPort = "listeningPort"
         static let status = "status"
-        static let searchOnlyFreeSlots = "searchOnlyFreeSlots"
         static let searchSortOrder = "searchSortOrder"
         static let downloadSortOrder = "downloadSortOrder"
     }
@@ -62,12 +61,10 @@ final class SessionStore {
     var searchOptions: SearchOptions {
         get {
             SearchOptions(
-                onlyFreeSlots: defaults.bool(forKey: Key.searchOnlyFreeSlots),
                 sortOrder: SearchSortOrder(rawValue: defaults.integer(forKey: Key.searchSortOrder)) ?? .arrival
             )
         }
         set {
-            defaults.set(newValue.onlyFreeSlots, forKey: Key.searchOnlyFreeSlots)
             defaults.set(newValue.sortOrder.rawValue, forKey: Key.searchSortOrder)
         }
     }
