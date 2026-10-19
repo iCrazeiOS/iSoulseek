@@ -3,14 +3,24 @@ import UIKit
 /// A user's share, one section per folder. Folders expand one at a time.
 final class BrowseViewController: UIViewController {
 
+    private struct Section {
+        let folder: ShareFolder
+        let files: [ShareFile]
+        let isExpanded: Bool
+    }
+
     private let username: String
     private let client: SoulseekClient
 
     private let tableView = UITableView(frame: .zero, style: .plain)
+    private let searchBar = UISearchBar()
     private let messageView = MessageView()
 
     private var folders: [ShareFolder] = []
+    private var sections: [Section] = []
     private var expandedPath: String?
+    private var collapsedPaths: Set<String> = []
+    private var searchQuery = ""
     private var hasLoaded = false
 
     init(username: String, client: SoulseekClient) {
@@ -28,8 +38,17 @@ final class BrowseViewController: UIViewController {
         super.viewDidLoad()
         title = username
         view.backgroundColor = .systemBackground
+        configureSearchBar()
         configureTable()
         load()
+    }
+
+    private func configureSearchBar() {
+        searchBar.placeholder = "Folder or song name"
+        searchBar.autocapitalizationType = .none
+        searchBar.autocorrectionType = .no
+        searchBar.searchBarStyle = .minimal
+        searchBar.delegate = self
     }
 
     private func configureTable() {
@@ -40,19 +59,24 @@ final class BrowseViewController: UIViewController {
         tableView.estimatedRowHeight = 64
         tableView.sectionHeaderHeight = UITableView.automaticDimension
         tableView.estimatedSectionHeaderHeight = 60
+        tableView.keyboardDismissMode = .onDrag
         tableView.register(BrowseFileCell.self, forCellReuseIdentifier: BrowseFileCell.reuseIdentifier)
         tableView.register(FolderHeaderView.self,
                            forHeaderFooterViewReuseIdentifier: FolderHeaderView.reuseIdentifier)
-        view.addSubview(tableView)
+
+        let stack = UIStackView(arrangedSubviews: [searchBar, tableView])
+        stack.axis = .vertical
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
 
         messageView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(messageView)
 
         NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: view.topAnchor),
-            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
             messageView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             messageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -75,6 +99,7 @@ final class BrowseViewController: UIViewController {
                 self.folders = folders
                 self.hasLoaded = true
                 self.messageView.isHidden = true
+                self.rebuildSections()
                 self.updateSummary()
                 self.tableView.reloadData()
 
@@ -92,10 +117,39 @@ final class BrowseViewController: UIViewController {
         navigationItem.prompt = "\(fileCount.formatted()) files · \(Formatters.bytes(totalSize))"
     }
 
+    // MARK: Searching
+
+    private func rebuildSections() {
+        guard !searchQuery.isEmpty else {
+            sections = folders.map {
+                Section(folder: $0, files: $0.files, isExpanded: $0.path == expandedPath)
+            }
+            return
+        }
+
+        sections = folders.compactMap { folder in
+            let folderMatches = folder.path.localizedCaseInsensitiveContains(searchQuery)
+            let matchingFiles = folder.files.filter {
+                $0.name.localizedCaseInsensitiveContains(searchQuery)
+            }
+            guard folderMatches || !matchingFiles.isEmpty else { return nil }
+            let files = folderMatches ? folder.files : matchingFiles
+            return Section(folder: folder, files: files,
+                           isExpanded: !collapsedPaths.contains(folder.path))
+        }
+    }
+
     // MARK: Actions
 
     private func toggle(_ folder: ShareFolder) {
-        expandedPath = expandedPath == folder.path ? nil : folder.path
+        if searchQuery.isEmpty {
+            expandedPath = expandedPath == folder.path ? nil : folder.path
+        } else if collapsedPaths.contains(folder.path) {
+            collapsedPaths.remove(folder.path)
+        } else {
+            collapsedPaths.insert(folder.path)
+        }
+        rebuildSections()
         tableView.reloadData()
     }
 
@@ -122,17 +176,17 @@ final class BrowseViewController: UIViewController {
 extension BrowseViewController: UITableViewDataSource {
 
     func numberOfSections(in tableView: UITableView) -> Int {
-        folders.count
+        sections.count
     }
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        folders[section].path == expandedPath ? folders[section].files.count : 0
+        sections[section].isExpanded ? sections[section].files.count : 0
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: BrowseFileCell.reuseIdentifier,
                                                  for: indexPath)
-        let file = folders[indexPath.section].files[indexPath.row]
+        let file = sections[indexPath.section].files[indexPath.row]
         (cell as? BrowseFileCell)?.configure(with: file)
         return cell
     }
@@ -143,10 +197,11 @@ extension BrowseViewController: UITableViewDataSource {
 extension BrowseViewController: UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-        let folder = folders[section]
+        let model = sections[section]
+        let folder = model.folder
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: FolderHeaderView.reuseIdentifier) as? FolderHeaderView
-        header?.configure(folder: folder, isExpanded: folder.path == expandedPath)
+        header?.configure(folder: folder, isExpanded: model.isExpanded)
         header?.onToggle = { [weak self] in self?.toggle(folder) }
         header?.onDownload = { [weak self] in self?.download(folder: folder) }
         return header
@@ -154,20 +209,36 @@ extension BrowseViewController: UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        let folder = folders[indexPath.section]
-        download(file: folder.files[indexPath.row], in: folder)
+        let folder = sections[indexPath.section].folder
+        download(file: sections[indexPath.section].files[indexPath.row], in: folder)
     }
 
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath)
     -> UISwipeActionsConfiguration? {
-        let folder = folders[indexPath.section]
-        let file = folder.files[indexPath.row]
+        let folder = sections[indexPath.section].folder
+        let file = sections[indexPath.section].files[indexPath.row]
         let action = UIContextualAction(style: .normal, title: "Download") { [weak self] _, _, completion in
             self?.download(file: file, in: folder)
             completion(true)
         }
         action.backgroundColor = .systemBlue
         return UISwipeActionsConfiguration(actions: [action])
+    }
+}
+
+// MARK: - UISearchBarDelegate
+
+extension BrowseViewController: UISearchBarDelegate {
+
+    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+        searchQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        collapsedPaths.removeAll()
+        rebuildSections()
+        tableView.reloadData()
+    }
+
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.resignFirstResponder()
     }
 }
 
