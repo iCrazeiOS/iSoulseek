@@ -63,6 +63,14 @@ final class SearchViewController: UIViewController {
 
     private lazy var optionsItem = UIBarButtonItem(image: nil, style: .plain,
                                                    target: nil, action: nil)
+    private lazy var browseItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(image: UIImage(systemName: "person.2.wave.2.fill"),
+                                   style: .plain,
+                                   target: self,
+                                   action: #selector(promptForUsername))
+        item.accessibilityLabel = "Browse user"
+        return item
+    }()
 
     init(client: SoulseekClient) {
         self.client = client
@@ -157,8 +165,7 @@ final class SearchViewController: UIViewController {
 
     private func configureNavigation() {
         navigationItem.leftBarButtonItem = optionsItem
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Browse user…", style: .plain,
-                                                            target: self, action: #selector(promptForUsername))
+        navigationItem.rightBarButtonItem = browseItem
     }
 
     private func observeClient() {

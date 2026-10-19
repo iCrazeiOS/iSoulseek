@@ -73,7 +73,8 @@ registers it.
    Keychain (`WhenUnlockedThisDeviceOnly`).
 2. **Search** — global search across the network. Results arrive as peers reply and are grouped by
    user; a result with a free slot will start downloading immediately, queued ones may wait a while.
-3. **Browse** — tap *Browse* on a result's section header, or *Browse user…* in the search screen.
+3. **Browse** — tap *Browse* on a result's section header, or the browse-user button in the search
+   screen.
    Download single files or whole folders.
 4. **Downloads** — live progress for both directions, swipe to cancel, *Clear finished* to tidy up.
 5. **Files** — downloaded files live in `On My iPhone ▸ Soulseek ▸ Downloads` because file sharing is
