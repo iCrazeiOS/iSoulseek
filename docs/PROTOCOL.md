@@ -1,8 +1,8 @@
-# Soulseek wire protocol — implementation notes
+# Soulseek wire protocol reference
 
-Condensed working spec for this client. Compiled from the Nicotine+, Soulseek.NET (slskd) and
-aioslsk implementations plus the community `SLSKPROTOCOL` document. Facts only; no third-party code
-is copied into this repository.
+Reference for the subset of the Soulseek protocol this client implements. Compiled from the
+Nicotine+, Soulseek.NET (slskd) and aioslsk implementations plus the community `SLSKPROTOCOL`
+document. Facts only; no third-party code is copied into this repository.
 
 ## 1. Primitives
 

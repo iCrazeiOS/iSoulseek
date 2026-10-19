@@ -10,9 +10,8 @@ Written in Swift with UIKit. No third-party dependencies.
 
 - Xcode 27 or newer (the project targets the iOS 27 SDK)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
-- **iOS 15.0 or newer.** The original brief asked for iOS 13, but the installed toolchain rejects
-  anything below 15.0 (`the range of supported deployment target versions is 15.0 to 27.0.x`), so
-  15.0 is the floor.
+- **iOS 15.0 or newer.** Xcode 27 rejects a deployment target below 15.0
+  (`the range of supported deployment target versions is 15.0 to 27.0.x`), so 15.0 is the floor.
 
 ### Note on the iOS 27 SDK running on a Mac
 
@@ -44,8 +43,8 @@ xcodebuild -project Soulseek.xcodeproj -scheme Soulseek \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
-This runs 135+ unit and integration tests, including an in-process mock Soulseek server and peer
-that speak the real wire protocol. The two live tests are skipped unless you opt in:
+This runs the unit and integration suite (140+ tests), including an in-process mock Soulseek server
+and peer that speak the real wire protocol. The live tests are skipped unless you opt in:
 
 ```sh
 # Unit test bundle
@@ -110,8 +109,7 @@ Soulseek/
   UI/          Root, Login, Search, Browse, Downloads, Settings
 SoulseekTests/ unit tests and an in-process mock server
 SoulseekUITests/ opt-in UI flow test that drives the app against the real network
-docs/PROTOCOL.md  condensed wire-format reference
-PLAN.md           design notes, phases and the security checklist
+docs/PROTOCOL.md  wire-format reference
 ```
 
 Everything protocol-related runs on one serial `DispatchQueue` owned by `SoulseekClient`, so the

@@ -30,10 +30,6 @@ Package.resolved
 *.local.xcconfig
 Local.xcconfig
 
-# Reference material fetched from third-party (GPL) sources during research.
-# Kept on disk for development only, never distributed with this project.
-_research/
-
 # Local run artifacts
 *.log
 /artifacts/
