@@ -1,4 +1,5 @@
 import Combine
+import QuickLook
 import UIKit
 
 /// Transfers, split into a "Downloading" tab (active) and a "Completed" tab (finished).
@@ -14,6 +15,7 @@ final class DownloadsViewController: UIViewController {
     private var transfers: [Transfer] = []
     private var displayed: [Transfer] = []
     private var reloadScheduled = false
+    private var previewURL: URL?
 
     private var showsCompleted: Bool {
         get { tabControl.selectedSegmentIndex == 1 }
@@ -148,6 +150,28 @@ final class DownloadsViewController: UIViewController {
         transfers = client.transfers()
         rebuild()
     }
+
+    // MARK: Completed downloads
+
+    /// Where a download's bytes live on disk, mirroring the transfer manager's sanitisation.
+    private func localURL(for transfer: Transfer) -> URL? {
+        PathSanitizer.destination(in: client.store.downloadsDirectory, virtualPath: transfer.filename)
+    }
+
+    private func canPreview(_ transfer: Transfer) -> Bool {
+        showsCompleted && !transfer.isUpload && transfer.state == .completed
+    }
+
+    private func presentPreview(for transfer: Transfer) {
+        guard let url = localURL(for: transfer), FileManager.default.fileExists(atPath: url.path) else {
+            Theme.showToast("This file is no longer on the device", in: view)
+            return
+        }
+        previewURL = url
+        let controller = QLPreviewController()
+        controller.dataSource = self
+        present(controller, animated: true)
+    }
 }
 
 // MARK: - UITableViewDataSource
@@ -160,7 +184,8 @@ extension DownloadsViewController: UITableViewDataSource {
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: TransferCell.reuseIdentifier, for: indexPath)
-        (cell as? TransferCell)?.configure(with: displayed[indexPath.row])
+        let transfer = displayed[indexPath.row]
+        (cell as? TransferCell)?.configure(with: transfer, showsChevron: canPreview(transfer))
         return cell
     }
 }
@@ -168,6 +193,13 @@ extension DownloadsViewController: UITableViewDataSource {
 // MARK: - UITableViewDelegate
 
 extension DownloadsViewController: UITableViewDelegate {
+
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let transfer = displayed[indexPath.row]
+        guard canPreview(transfer) else { return }
+        presentPreview(for: transfer)
+    }
 
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath)
     -> UISwipeActionsConfiguration? {
@@ -179,6 +211,19 @@ extension DownloadsViewController: UITableViewDelegate {
             completion(true)
         }
         return UISwipeActionsConfiguration(actions: [action])
+    }
+}
+
+// MARK: - QLPreviewControllerDataSource
+
+extension DownloadsViewController: QLPreviewControllerDataSource {
+
+    func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
+        previewURL == nil ? 0 : 1
+    }
+
+    func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+        (previewURL ?? client.store.downloadsDirectory) as NSURL
     }
 }
 
@@ -204,11 +249,12 @@ private final class TransferCell: UITableViewCell {
         fatalError("init(coder:) is not supported")
     }
 
-    func configure(with transfer: Transfer) {
+    func configure(with transfer: Transfer, showsChevron: Bool = false) {
         directionLabel.text = transfer.isUpload ? "↑" : "↓"
         directionLabel.textColor = transfer.isUpload ? .systemOrange : .systemBlue
         nameLabel.text = transfer.localFilename
         statusLabel.text = "\(transfer.username) · \(transfer.state.description)"
+        accessoryType = showsChevron ? .disclosureIndicator : .none
 
         progressView.isHidden = !transfer.state.isActive
         progressView.progress = transfer.progress
