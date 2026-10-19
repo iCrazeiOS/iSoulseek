@@ -1,0 +1,237 @@
+import Combine
+import XCTest
+@testable import iSoulseek
+
+/// Download/upload integration tests.
+final class TransferIntegrationTests: XCTestCase {
+
+    private var env: TestEnvironment!
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        env = TestEnvironment()
+    }
+
+    override func tearDownWithError() throws {
+        env?.tearDown()
+        env = nil
+        try super.tearDownWithError()
+    }
+
+    private func makePayload(_ count: Int) -> Data {
+        Data((0..<count).map { UInt8(($0 &* 7 &+ 3) & 0xFF) })
+    }
+
+    // MARK: Download
+
+    func testDownloadCompletesAndWritesFile() {
+        let payload = makePayload(4096)
+        env.peer.downloadPayload = payload
+        let filename = "Music\\song.bin"
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        var transfers: [Transfer] = []
+        let cancellable = env.client.transferChanges.sink { transfers.append($0) }
+        defer { cancellable.cancel() }
+
+
+        env.client.download(username: "MockPeer", filename: filename, size: UInt64(payload.count))
+
+        assertEventually("download never completed", timeout: 3) {
+            transfers.last(where: { !$0.isUpload })?.state == .completed
+        }
+
+        let destination = env.downloadsDirectory.appendingPathComponent("Music/song.bin")
+        assertEventually("file was not written", timeout: 3) {
+            (try? Data(contentsOf: destination))?.count == payload.count
+        }
+        XCTAssertEqual((try? Data(contentsOf: destination)), payload)
+    }
+
+    func testDownloadResumesFromExistingBytes() {
+        let payload = makePayload(1000)
+        env.peer.downloadPayload = payload
+        let filename = "Music\\resume.bin"
+        let destination = env.downloadsDirectory.appendingPathComponent("Music/resume.bin")
+
+        // Pre-create a partial download with the first 300 bytes already on disk.
+        try? FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        try? payload.prefix(300).write(to: destination)
+
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        var transfers: [Transfer] = []
+        let cancellable = env.client.transferChanges.sink { transfers.append($0) }
+        defer { cancellable.cancel() }
+
+
+        env.client.download(username: "MockPeer", filename: filename, size: UInt64(payload.count))
+
+        assertEventually("mock was never asked for an offset", timeout: 3) {
+            env.peer.downloadAskedOffset != nil
+        }
+        XCTAssertEqual(env.peer.downloadAskedOffset, 300,
+                       "the client must resume from the bytes already on disk")
+
+        assertEventually("download never completed", timeout: 3) {
+            transfers.last(where: { !$0.isUpload })?.state == .completed
+        }
+        assertEventually("file was not completed", timeout: 3) {
+            (try? Data(contentsOf: destination))?.count == payload.count
+        }
+        XCTAssertEqual((try? Data(contentsOf: destination)), payload)
+    }
+
+    /// The uploader cannot reach our listener, so it asks the server to have us dial it instead.
+    func testDownloadCompletesViaIndirectConnection() {
+        let payload = makePayload(3000)
+        env.peer.downloadPayload = payload
+        env.peer.downloadViaIndirect = true
+        let filename = "Music\\indirect.bin"
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        var transfers: [Transfer] = []
+        let cancellable = env.client.transferChanges.sink { transfers.append($0) }
+        defer { cancellable.cancel() }
+
+        env.client.download(username: "MockPeer", filename: filename, size: UInt64(payload.count))
+
+        assertEventually("the client never dialled the peer back", timeout: 3) {
+            !env.peer.filePierceTokens.isEmpty
+        }
+        assertEventually("download never completed", timeout: 3) {
+            transfers.last(where: { !$0.isUpload })?.state == .completed
+        }
+
+        let destination = env.downloadsDirectory.appendingPathComponent("Music/indirect.bin")
+        XCTAssertEqual((try? Data(contentsOf: destination)), payload)
+    }
+
+    /// Deleting a completed download removes the file and any folders it left empty.
+    func testDeletingCompletedDownloadRemovesFile() {
+        let payload = makePayload(2048)
+        env.peer.downloadPayload = payload
+        let filename = "Music\\Album\\deleteme.bin"
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        var transfers: [Transfer] = []
+        let cancellable = env.client.transferChanges.sink { transfers.append($0) }
+        defer { cancellable.cancel() }
+
+        env.client.download(username: "MockPeer", filename: filename, size: UInt64(payload.count))
+        assertEventually("download never completed", timeout: 3) {
+            transfers.last(where: { !$0.isUpload })?.state == .completed
+        }
+
+        let destination = env.downloadsDirectory.appendingPathComponent("Music/Album/deleteme.bin")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+
+        guard let id = transfers.last(where: { !$0.isUpload && $0.state == .completed })?.id else {
+            return XCTFail("no completed download to delete")
+        }
+        env.client.deleteTransfer(id: id, deleteFile: true)
+
+        assertEventually("file was not deleted", timeout: 3) {
+            !FileManager.default.fileExists(atPath: destination.path)
+        }
+        XCTAssertTrue(env.client.transfers().allSatisfy { $0.id != id })
+        assertEventually("empty folders were not cleaned up", timeout: 3) {
+            !FileManager.default.fileExists(atPath: env.downloadsDirectory.appendingPathComponent("Music").path)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: env.downloadsDirectory.path),
+                      "the downloads root must be kept")
+    }
+
+    // MARK: Upload
+
+    func testUploadServesSharedFile() {
+        let payload = makePayload(2048)
+        let virtualPath = "Shared\\served.bin"
+        let sharedFile = env.shareDirectory.appendingPathComponent("served.bin")
+        try? payload.write(to: sharedFile)
+
+        XCTAssertTrue(env.connectAndWaitForLogin())
+        env.client.rescanShares()
+        assertEventually("share index was not scanned") { env.client.shares.value.fileCount == 1 }
+
+        env.peer.uploadExpectedSize = payload.count
+
+
+        env.peer.requestUpload(virtualPath: virtualPath)
+
+        assertEventually("no TransferRequest reached the peer", timeout: 3) {
+            !env.peer.transferRequests.isEmpty
+        }
+        let request = env.peer.transferRequests.first
+        XCTAssertEqual(request?.direction, .upload)
+        XCTAssertEqual(request?.filename, virtualPath)
+        XCTAssertEqual(request?.size, UInt64(payload.count))
+
+        assertEventually("the client did not stream the file bytes", timeout: 3) {
+            env.peer.receivedUploadBytes.count >= payload.count
+        }
+        XCTAssertEqual(env.peer.receivedUploadBytes, payload)
+
+        assertEventually("SendUploadSpeed was not reported", timeout: 3) {
+            !env.server.uploadSpeeds.isEmpty
+        }
+    }
+
+    /// The direct route is unreachable, so the client must ask the downloader to dial it back.
+    func testUploadServesSharedFileViaIndirectConnection() {
+        let payload = makePayload(2048)
+        let virtualPath = "Shared\\served-indirect.bin"
+        let sharedFile = env.shareDirectory.appendingPathComponent("served-indirect.bin")
+        try? payload.write(to: sharedFile)
+
+        // Report an unreachable address so the direct dial fails and the indirect path is used.
+        env.server.peerPortOverride = 1
+        env.peer.uploadExpectedSize = payload.count
+
+        XCTAssertTrue(env.connectAndWaitForLogin())
+        env.client.rescanShares()
+        assertEventually("share index was not scanned") { env.client.shares.value.fileCount == 1 }
+
+        env.peer.requestUpload(virtualPath: virtualPath)
+
+        assertEventually("the client never requested an indirect connection", timeout: 3) {
+            env.server.connectToPeerRequests.contains { $0.type == "F" }
+        }
+        assertEventually("the client did not stream the file bytes", timeout: 3) {
+            env.peer.receivedUploadBytes.count >= payload.count
+        }
+        XCTAssertEqual(env.peer.receivedUploadBytes, payload)
+    }
+
+    func testUploadDeniedForUnsharedFile() {
+        XCTAssertTrue(env.connectAndWaitForLogin())
+        env.client.rescanShares()
+        // An empty share tree still has the synthetic root folder; wait for the scan to finish.
+        assertEventually("share scan did not finish") { env.client.shares.value.folderCount >= 1 }
+
+
+        env.peer.requestUpload(virtualPath: "Shared\\not-shared.mp3")
+
+        assertEventually("no UploadDenied reached the peer", timeout: 3) {
+            !env.peer.uploadDenied.isEmpty
+        }
+        XCTAssertEqual(env.peer.uploadDenied.first?.filename, "Shared\\not-shared.mp3")
+        XCTAssertEqual(env.peer.uploadDenied.first?.reason, "File not shared.")
+    }
+
+    /// An inbound file connection whose token we never issued must be refused, not served.
+    func testInboundFileConnectionWithUnknownTokenIsRefused() {
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        env.peer.sendUnsolicitedFileTransfer(token: 0xDEAD_BEEF)
+
+        assertEventually("the client kept an unsolicited file connection open", timeout: 5) {
+            env.peer.unsolicitedFileConnectionClosed
+        }
+        XCTAssertEqual(env.peer.unsolicitedOffsetBytes, 0,
+                       "the client must not answer an unknown transfer token")
+        let written = (try? FileManager.default.contentsOfDirectory(atPath: env.downloadsDirectory.path)) ?? []
+        XCTAssertEqual(written, [], "nothing should have been written to disk")
+    }
+}

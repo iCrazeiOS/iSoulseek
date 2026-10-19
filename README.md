@@ -1,4 +1,4 @@
-# Soulseek for iOS
+# iSoulseek
 
 A native iOS client for the [Soulseek](https://www.slsknet.org/) peer-to-peer network: sign in,
 search the network, browse other users' shares, and download to the app's Documents folder. It also
@@ -25,21 +25,21 @@ supported."* The search screen therefore uses a plain `UISearchBar` in the conte
 ## Build and run
 
 ```sh
-xcodegen generate                       # writes Soulseek.xcodeproj from project.yml
-open Soulseek.xcodeproj                 # then run on a simulator or device
+xcodegen generate                       # writes iSoulseek.xcodeproj from project.yml
+open iSoulseek.xcodeproj                 # then run on a simulator or device
 ```
 
 Command line:
 
 ```sh
-xcodebuild -project Soulseek.xcodeproj -scheme Soulseek \
+xcodebuild -project iSoulseek.xcodeproj -scheme iSoulseek \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
 ```
 
 Tests:
 
 ```sh
-xcodebuild -project Soulseek.xcodeproj -scheme Soulseek \
+xcodebuild -project iSoulseek.xcodeproj -scheme iSoulseek \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
@@ -49,21 +49,21 @@ and peer that speak the real wire protocol. The live tests are skipped unless yo
 ```sh
 # Unit test bundle
 SOULSEEK_LIVE=1 SOULSEEK_LIVE_USER=<user> SOULSEEK_LIVE_PASS=<pass> \
-  xcodebuild -project Soulseek.xcodeproj -scheme Soulseek \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:SoulseekTests test
+  xcodebuild -project iSoulseek.xcodeproj -scheme iSoulseek \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:iSoulseekTests test
 
 # UI flow test (xcodebuild only forwards TEST_RUNNER_-prefixed variables to a UI test runner)
 TEST_RUNNER_SOULSEEK_LIVE=1 \
 TEST_RUNNER_SOULSEEK_LIVE_USER=<user> TEST_RUNNER_SOULSEEK_LIVE_PASS=<pass> \
-  xcodebuild -project Soulseek.xcodeproj -scheme Soulseek \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:SoulseekUITests test
+  xcodebuild -project iSoulseek.xcodeproj -scheme iSoulseek \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:iSoulseekUITests test
 ```
 
 The live tests sign in to `server.slsknet.org`, run one search, and (in the UI test) drive the whole
 app: sign in, search, check the tabs. Use a throwaway account — signing in with an unused name
 registers it.
 
-`Soulseek.xcodeproj` is generated and therefore not committed; `project.yml` is the source of truth.
+`iSoulseek.xcodeproj` is generated and therefore not committed; `project.yml` is the source of truth.
 
 ## Using the app
 
@@ -76,9 +76,9 @@ registers it.
    screen.
    Download single files or whole folders.
 4. **Downloads** — live progress for both directions, swipe to cancel, *Clear finished* to tidy up.
-5. **Files** — downloaded files live in `On My iPhone ▸ Soulseek ▸ Downloads` because file sharing is
+5. **Files** — downloaded files live in `On My iPhone ▸ iSoulseek ▸ Downloads` because file sharing is
    enabled for the app, so you can move them out with the Files app.
-6. **Shares** — anything you put in `On My iPhone ▸ Soulseek ▸ Shared` is served to other users.
+6. **Shares** — anything you put in `On My iPhone ▸ iSoulseek ▸ Shared` is served to other users.
 
 ## Limitations
 
@@ -100,15 +100,15 @@ registers it.
 ## Architecture
 
 ```
-Soulseek/
+iSoulseek/
   App/         AppDelegate, SceneDelegate, Info.plist, assets
   Model/       ShareFile/ShareFolder, SearchResult, Transfer, ConnectionState
   Protocol/    bounds-checked byte reader/writer, message codes, typed messages, zlib
   Network/     FrameDecoder, SocketConnection (NWConnection), PeerListener (NWListener)
   Services/    SoulseekClient, TransferManager, PeerSession, ShareIndex, SessionStore, Keychain
   UI/          Root, Login, Search, Browse, Downloads, Settings
-SoulseekTests/ unit tests and an in-process mock server
-SoulseekUITests/ opt-in UI flow test that drives the app against the real network
+iSoulseekTests/ unit tests and an in-process mock server
+iSoulseekUITests/ opt-in UI flow test that drives the app against the real network
 docs/PROTOCOL.md  wire-format reference
 ```
 
