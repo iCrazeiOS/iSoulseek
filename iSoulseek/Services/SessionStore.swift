@@ -54,7 +54,10 @@ final class SessionStore {
     }
 
     var status: UserStatus {
-        get { UserStatus(rawValue: UInt32(defaults.integer(forKey: Key.status))) ?? .online }
+        get {
+            let stored = UserStatus(rawValue: UInt32(defaults.integer(forKey: Key.status)))
+            return stored == .away ? .away : .online
+        }
         set { defaults.set(Int(newValue.rawValue), forKey: Key.status) }
     }
 

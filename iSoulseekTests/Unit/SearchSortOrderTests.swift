@@ -51,4 +51,16 @@ final class SearchSortOrderTests: XCTestCase {
         XCTAssertEqual(defaults.integer(forKey: "searchSortOrder"), SearchSortOrder.largest.rawValue)
         XCTAssertEqual(store.searchSortOrder, .largest)
     }
+
+    func testStatusDefaultsToOnline() {
+        let suite = "SearchSortOrderTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+
+        let store = SessionStore(defaults: defaults, keychainService: "test.\(suite)")
+        XCTAssertEqual(store.status, .online)
+
+        store.status = .away
+        XCTAssertEqual(store.status, .away)
+    }
 }
