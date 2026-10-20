@@ -41,7 +41,7 @@ final class TransferIntegrationTests: XCTestCase {
             transfers.last(where: { !$0.isUpload })?.state == .completed
         }
 
-        let destination = env.downloadsDirectory.appendingPathComponent("Music/song.bin")
+        let destination = env.downloadsDirectory.appendingPathComponent("MockPeer/Music/song.bin")
         assertEventually("file was not written", timeout: 3) {
             (try? Data(contentsOf: destination))?.count == payload.count
         }
@@ -68,7 +68,7 @@ final class TransferIntegrationTests: XCTestCase {
             transfers.last(where: { !$0.isUpload })?.state == .completed
         }
 
-        let destination = env.downloadsDirectory.appendingPathComponent("Music/unsized.bin")
+        let destination = env.downloadsDirectory.appendingPathComponent("MockPeer/Music/unsized.bin")
         assertEventually("file was not written", timeout: 3) {
             (try? Data(contentsOf: destination)) == payload
         }
@@ -80,8 +80,8 @@ final class TransferIntegrationTests: XCTestCase {
         let payload = makePayload(1000)
         env.peer.downloadPayload = payload
         let filename = "Music\\resume.bin"
-        let destination = env.downloadsDirectory.appendingPathComponent("Music/resume.bin")
-        let partial = env.downloadsDirectory.appendingPathComponent(".partials/Music/resume.bin")
+        let destination = env.downloadsDirectory.appendingPathComponent("MockPeer/Music/resume.bin")
+        let partial = env.downloadsDirectory.appendingPathComponent(".partials/MockPeer/Music/resume.bin")
 
         // Pre-create a partial download with the first 300 bytes already on disk.
         try? FileManager.default.createDirectory(at: partial.deletingLastPathComponent(),
@@ -117,7 +117,7 @@ final class TransferIntegrationTests: XCTestCase {
         let payload = makePayload(512)
         env.peer.downloadPayload = payload
         let filename = "Music\\replace.bin"
-        let destination = env.downloadsDirectory.appendingPathComponent("Music/replace.bin")
+        let destination = env.downloadsDirectory.appendingPathComponent("MockPeer/Music/replace.bin")
 
         try? FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
@@ -158,7 +158,7 @@ final class TransferIntegrationTests: XCTestCase {
             transfers.last(where: { !$0.isUpload })?.state == .completed
         }
 
-        let destination = env.downloadsDirectory.appendingPathComponent("Music/indirect.bin")
+        let destination = env.downloadsDirectory.appendingPathComponent("MockPeer/Music/indirect.bin")
         XCTAssertEqual((try? Data(contentsOf: destination)), payload)
     }
 
@@ -178,7 +178,7 @@ final class TransferIntegrationTests: XCTestCase {
             transfers.last(where: { !$0.isUpload })?.state == .completed
         }
 
-        let destination = env.downloadsDirectory.appendingPathComponent("Music/Album/deleteme.bin")
+        let destination = env.downloadsDirectory.appendingPathComponent("MockPeer/Music/Album/deleteme.bin")
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
 
         DownloadedFiles.delete(destination, upTo: env.downloadsDirectory)
@@ -186,7 +186,7 @@ final class TransferIntegrationTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
         XCTAssertTrue(env.client.transfers().isEmpty)
         assertEventually("empty folders were not cleaned up", timeout: 3) {
-            !FileManager.default.fileExists(atPath: env.downloadsDirectory.appendingPathComponent("Music").path)
+            !FileManager.default.fileExists(atPath: env.downloadsDirectory.appendingPathComponent("MockPeer").path)
         }
         XCTAssertTrue(FileManager.default.fileExists(atPath: env.downloadsDirectory.path),
                       "the downloads root must be kept")
@@ -213,10 +213,10 @@ final class TransferIntegrationTests: XCTestCase {
             transfers.last(where: { $0.filename == secondFilename })?.state == .completed
         }
 
-        let first = env.downloadsDirectory.appendingPathComponent("Artist/Album/one.bin")
-        let second = env.downloadsDirectory.appendingPathComponent("Artist/Album/two.bin")
-        let album = env.downloadsDirectory.appendingPathComponent("Artist/Album")
-        let artist = env.downloadsDirectory.appendingPathComponent("Artist")
+        let first = env.downloadsDirectory.appendingPathComponent("MockPeer/Artist/Album/one.bin")
+        let second = env.downloadsDirectory.appendingPathComponent("MockPeer/Artist/Album/two.bin")
+        let album = env.downloadsDirectory.appendingPathComponent("MockPeer/Artist/Album")
+        let artist = env.downloadsDirectory.appendingPathComponent("MockPeer/Artist")
 
         DownloadedFiles.delete(first, upTo: env.downloadsDirectory)
         XCTAssertFalse(FileManager.default.fileExists(atPath: first.path))
@@ -254,9 +254,9 @@ final class TransferIntegrationTests: XCTestCase {
             transfers.filter { !$0.isUpload && $0.state == .completed }.count == 2
         }
 
-        let first = env.downloadsDirectory.appendingPathComponent("Music/Album/one.bin")
-        let second = env.downloadsDirectory.appendingPathComponent("Music/Album/two.bin")
-        let partial = env.downloadsDirectory.appendingPathComponent(".partials/Music/Album/three.bin")
+        let first = env.downloadsDirectory.appendingPathComponent("MockPeer/Music/Album/one.bin")
+        let second = env.downloadsDirectory.appendingPathComponent("MockPeer/Music/Album/two.bin")
+        let partial = env.downloadsDirectory.appendingPathComponent(".partials/MockPeer/Music/Album/three.bin")
         try? FileManager.default.createDirectory(at: partial.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
         try? Data(repeating: 0xEE, count: 10).write(to: partial)
@@ -272,7 +272,7 @@ final class TransferIntegrationTests: XCTestCase {
         }
         XCTAssertTrue(env.client.transfers().isEmpty)
         assertEventually("empty folders were not cleaned up", timeout: 3) {
-            !FileManager.default.fileExists(atPath: env.downloadsDirectory.appendingPathComponent("Music").path)
+            !FileManager.default.fileExists(atPath: env.downloadsDirectory.appendingPathComponent("MockPeer").path)
         }
         XCTAssertTrue(FileManager.default.fileExists(atPath: env.downloadsDirectory.path),
                       "the downloads root must be kept")

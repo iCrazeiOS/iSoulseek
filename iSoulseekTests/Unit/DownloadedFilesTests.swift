@@ -83,28 +83,32 @@ final class DownloadedFilesTests: XCTestCase {
                        ["A.flac", "B.flac", "C.flac"])
     }
 
-    func testTreeGroupsFilesByFolder() {
+    func testTreeGroupsFilesByUsernameAndFolder() {
         let files = [
-            file("Artist/Album/b.mp3", size: 2, modified: 100),
-            file("Artist/Album/a.mp3", size: 3, modified: 300),
-            file("Artist/loose.mp3", size: 4, modified: 200),
-            file("Zeta/z.flac", size: 5, modified: 400),
+            file("alice/Music/Album/b.mp3", size: 2, modified: 100),
+            file("alice/Music/Album/a.mp3", size: 3, modified: 300),
+            file("alice/loose.mp3", size: 4, modified: 200),
+            file("bob/z.flac", size: 5, modified: 400),
             file("root.flac", size: 6, modified: 500),
         ]
         let root = DownloadTree.build(from: files, sortOrder: .oldest)
 
         XCTAssertEqual(root.name, "Downloads")
-        XCTAssertEqual(root.folders.map(\.name), ["Artist", "Zeta"])
+        XCTAssertEqual(root.folders.map(\.name), ["alice", "bob"])
         XCTAssertEqual(root.files.map(\.name), ["root.flac"])
         XCTAssertEqual(root.fileCount, 5)
         XCTAssertEqual(root.totalSize, 20)
 
-        let artist = root.folders[0]
-        XCTAssertEqual(artist.path, "Artist")
-        XCTAssertEqual(artist.folders.map(\.name), ["Album"])
-        XCTAssertEqual(artist.files.map(\.name), ["loose.mp3"])
-        XCTAssertEqual(artist.folders[0].path, "Artist/Album")
-        XCTAssertEqual(artist.folders[0].files.map(\.name), ["b.mp3", "a.mp3"])
+        let alice = root.folders[0]
+        XCTAssertEqual(alice.path, "alice")
+        XCTAssertEqual(alice.folders.map(\.name), ["Album"])
+        XCTAssertEqual(alice.files.map(\.name), ["loose.mp3"])
+        XCTAssertEqual(alice.folders[0].path, "alice/Album")
+        XCTAssertEqual(alice.folders[0].files.map(\.name), ["b.mp3", "a.mp3"])
+
+        let bob = root.folders[1]
+        XCTAssertTrue(bob.folders.isEmpty)
+        XCTAssertEqual(bob.files.map(\.name), ["z.flac"])
     }
 
     func testTreeCollapsesIntermediateFolders() {

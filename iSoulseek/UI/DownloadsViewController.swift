@@ -316,6 +316,7 @@ final class DownloadsViewController: UIViewController {
     private func visibleCompletedFiles(active: [Transfer]) -> [DownloadedFile] {
         let activePaths = Set(active.filter { !$0.isUpload }.compactMap { transfer in
             PathSanitizer.destination(in: client.store.downloadsDirectory,
+                                      username: transfer.username,
                                       virtualPath: transfer.filename)?.standardizedFileURL.path
         })
         return completedFiles.filter { !activePaths.contains($0.url.standardizedFileURL.path) }

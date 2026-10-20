@@ -30,23 +30,21 @@ final class TransferManagerTests: XCTestCase {
         return url
     }
 
-    func testSameDestinationFromDifferentUsersIsRejected() {
-        let first = manager.enqueueDownload(username: "alice", filename: "Music\\song.flac", size: 100)
-        guard case .added(let added) = first else {
+    func testSamePathFromDifferentUsersGetsSeparateFiles() {
+        guard case .added = manager.enqueueDownload(username: "alice", filename: "Music\\song.flac",
+                                                    size: 100) else {
             return XCTFail("first download was not added")
         }
-
-        let second = manager.enqueueDownload(username: "bob", filename: "Music\\song.flac", size: 100)
-        guard case .alreadyDownloading(let existing) = second else {
-            return XCTFail("second download should reuse the active transfer")
+        guard case .added = manager.enqueueDownload(username: "bob", filename: "Music\\song.flac",
+                                                    size: 100) else {
+            return XCTFail("second download was not added")
         }
 
-        XCTAssertEqual(existing.id, added.id)
-        XCTAssertEqual(manager.allTransfers.count, 1)
+        XCTAssertEqual(manager.allTransfers.count, 2)
     }
 
     func testCompleteFileIsReportedAsAlreadyDownloaded() throws {
-        _ = try write("Music/song.flac", bytes: 100)
+        _ = try write("alice/Music/song.flac", bytes: 100)
 
         let result = manager.enqueueDownload(username: "alice", filename: "Music\\song.flac", size: 100)
         guard case .alreadyDownloaded(let transfer) = result else {
@@ -58,7 +56,7 @@ final class TransferManagerTests: XCTestCase {
     }
 
     func testDifferentSizeExistingFileRestartsFromZero() throws {
-        _ = try write("Music/song.flac", bytes: 200)
+        _ = try write("alice/Music/song.flac", bytes: 200)
 
         let result = manager.enqueueDownload(username: "alice", filename: "Music\\song.flac", size: 100)
         guard case .added(let transfer) = result else {
@@ -70,7 +68,7 @@ final class TransferManagerTests: XCTestCase {
     }
 
     func testPartialExistingFileResumes() throws {
-        _ = try write(".partials/Music/song.flac", bytes: 40)
+        _ = try write(".partials/alice/Music/song.flac", bytes: 40)
 
         let result = manager.enqueueDownload(username: "alice", filename: "Music\\song.flac", size: 100)
         guard case .added(let transfer) = result else {
@@ -82,7 +80,7 @@ final class TransferManagerTests: XCTestCase {
     }
 
     func testCancelDiscardsPartialFile() throws {
-        let partial = try write(".partials/Music/song.flac", bytes: 40)
+        let partial = try write(".partials/alice/Music/song.flac", bytes: 40)
 
         let result = manager.enqueueDownload(username: "alice", filename: "Music\\song.flac", size: 100)
         guard case .added(let transfer) = result else {

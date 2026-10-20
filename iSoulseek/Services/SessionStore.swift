@@ -146,10 +146,14 @@ enum PathSanitizer {
         return result
     }
 
-    /// Returns a destination inside `root`, or `nil` when the path is unusable.
-    static func destination(in root: URL, virtualPath: String) -> URL? {
-        let parts = components(from: virtualPath)
-        guard !parts.isEmpty else { return nil }
+    /// Returns a destination inside `root` under the uploader's username, or `nil` when the path
+    /// is unusable.
+    static func destination(in root: URL, username: String, virtualPath: String) -> URL? {
+        let path = components(from: virtualPath)
+        guard let folder = components(from: username).first, !path.isEmpty else { return nil }
+
+        var parts = [folder]
+        parts.append(contentsOf: path.suffix(maximumComponents - 1))
 
         var url = root
         for (index, part) in parts.enumerated() {

@@ -73,19 +73,20 @@ enum DownloadSortOrder: Int, CaseIterable {
 /// Builds the completed downloads hierarchy from the flat file list.
 enum DownloadTree {
 
-    /// Groups files by the first and last directory only, so shared folder paths stay shallow.
+    /// Groups files by uploader and the file's immediate directory, so shared folder paths stay
+    /// shallow.
     static func build(from files: [DownloadedFile], sortOrder: DownloadSortOrder) -> DownloadFolder {
         let root = Node()
         for file in files {
             let directories = file.relativePath.split(separator: "/").dropLast()
-            guard let first = directories.first else {
+            guard let username = directories.first else {
                 root.files.append(file)
                 continue
             }
 
-            var node = root.folder(named: String(first))
-            if directories.count > 1, let last = directories.last {
-                node = node.folder(named: String(last))
+            var node = root.folder(named: String(username))
+            if directories.count > 1, let folder = directories.last {
+                node = node.folder(named: String(folder))
             }
             node.files.append(file)
         }

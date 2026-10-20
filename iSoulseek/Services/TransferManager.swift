@@ -115,9 +115,10 @@ final class TransferManager {
 
     @discardableResult
     func enqueueDownload(username: String, filename: String, size: UInt64) -> DownloadStartResult? {
-        guard let url = PathSanitizer.destination(in: downloadsDirectory, virtualPath: filename),
+        guard let url = PathSanitizer.destination(in: downloadsDirectory,
+                                                  username: username, virtualPath: filename),
               let partURL = PathSanitizer.destination(in: partialsDirectory,
-                                                      virtualPath: filename) else {
+                                                      username: username, virtualPath: filename) else {
             return nil
         }
 
