@@ -78,6 +78,14 @@ struct ShareFolder: Hashable {
         self.files = files
     }
 
+    /// Files in Finder-style natural order: track 2 before track 10, and non-numbered files such
+    /// as artwork or metadata after the numbered tracks.
+    var filesInNaturalOrder: [ShareFile] {
+        files.sorted {
+            $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+        }
+    }
+
     /// Splits a virtual path (`Music\Album`) into its components.
     static func components(of path: String) -> [String] {
         path.split(separator: "\\").map(String.init).filter { !$0.isEmpty }

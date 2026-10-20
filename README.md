@@ -20,7 +20,8 @@ dependencies.
   opens filters for file types, excluded words, size, bitrate, lossless files and free upload slots;
   Soulseek has no server-side filters, so they are applied locally and can be changed without
   searching again.
-- **Browse.** Expand folders, filter by name, and download files or whole folders.
+- **Browse.** Expand folders, filter by name, and download files or whole folders. Files list in
+  natural track order (`2` before `10`), with artwork and metadata files after the tracks.
 - **Transfers.** *Downloading* shows active downloads with progress, speed and cancel — failed
   downloads stay listed with their reason (with a toast at failure time) for the rest of the
   session, and queueing the same file again retires its failure row; *Downloaded*
