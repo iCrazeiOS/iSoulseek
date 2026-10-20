@@ -424,8 +424,13 @@ extension DownloadsViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath)
     -> UISwipeActionsConfiguration? {
         switch displayed[indexPath.row] {
-        case .folder:
-            return nil
+        case .folder(let folder, _):
+            let action = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, completion in
+                guard let self else { completion(false); return }
+                self.delete(folder.allFiles, toast: "Deleted \(folder.name)")
+                completion(true)
+            }
+            return UISwipeActionsConfiguration(actions: [action])
 
         case .transfer(let transfer):
             let action = UIContextualAction(style: .destructive, title: "Cancel") { [weak self] _, _, completion in
@@ -437,11 +442,7 @@ extension DownloadsViewController: UITableViewDelegate {
         case .file(let file, _):
             let deleteAction = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, completion in
                 guard let self else { completion(false); return }
-                DownloadedFiles.delete(file.url, upTo: self.client.store.downloadsDirectory)
-                self.scanGeneration += 1
-                self.completedFiles.removeAll { $0.url == file.url }
-                self.rebuild()
-                Theme.showToast("Deleted \(file.name)", in: self.view)
+                self.delete([file], toast: "Deleted \(file.name)")
                 completion(true)
             }
 
@@ -455,6 +456,18 @@ extension DownloadsViewController: UITableViewDelegate {
 
             return UISwipeActionsConfiguration(actions: [deleteAction, filesAction])
         }
+    }
+
+    /// Removes files and updates the list without waiting for the next filesystem scan.
+    private func delete(_ files: [DownloadedFile], toast: String) {
+        let root = client.store.downloadsDirectory
+        files.forEach { DownloadedFiles.delete($0.url, upTo: root) }
+
+        scanGeneration += 1
+        let deleted = Set(files.map(\.url))
+        completedFiles.removeAll { deleted.contains($0.url) }
+        rebuild()
+        Theme.showToast(toast, in: view)
     }
 
     /// Opens the containing folder in Files. There is no public API for this; `shareddocuments://`

@@ -34,6 +34,10 @@ struct DownloadFolder {
     var totalSize: UInt64 {
         files.reduce(0) { $0 + $1.size } + folders.reduce(0) { $0 + $1.totalSize }
     }
+
+    var allFiles: [DownloadedFile] {
+        files + folders.flatMap(\.allFiles)
+    }
 }
 
 /// Ordering applied to the completed downloads list.

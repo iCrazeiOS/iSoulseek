@@ -123,6 +123,7 @@ final class DownloadedFilesTests: XCTestCase {
         XCTAssertEqual(user.folders[0].files.map(\.name), ["other.mp3", "song.mp3"])
         XCTAssertEqual(user.files.map(\.name), ["top.mp3"])
         XCTAssertEqual(user.fileCount, 3)
+        XCTAssertEqual(user.allFiles.map(\.name).sorted(), ["other.mp3", "song.mp3", "top.mp3"])
     }
 
     func testLayoutPreferenceDefaultsToList() {
