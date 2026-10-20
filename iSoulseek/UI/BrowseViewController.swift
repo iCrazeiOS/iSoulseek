@@ -188,32 +188,33 @@ final class BrowseViewController: UIViewController {
 
     private func download(folder: ShareFolder) {
         guard !folder.files.isEmpty else { return }
-        var added = 0
-        var duplicates = 0
-        var completedAlready = 0
-        var rejected = 0
+
+        // Every completion is replied on the main queue, so plain counting there is race-free.
+        // The summary waits until all of them arrived: scheduling it eagerly would run before the
+        // enqueues have even reached the client queue and show nothing.
+        var counts = (added: 0, duplicates: 0, onDisk: 0, rejected: 0)
+        var remaining = folder.files.count
         for file in folder.files {
             client.download(username: username, filename: folder.path + "\\" + file.name,
-                            size: file.size) { outcome in
+                            size: file.size) { [weak self] outcome in
                 switch outcome {
-                case .added: added += 1
-                case .alreadyDownloading: duplicates += 1
-                case .alreadyDownloaded: completedAlready += 1
+                case .added: counts.added += 1
+                case .alreadyDownloading: counts.duplicates += 1
+                case .alreadyDownloaded: counts.onDisk += 1
                 case nil:
-                    rejected += 1
+                    counts.rejected += 1
                     AppLog.ui.error("folder download REJECTED outright: \(file.name, privacy: .public) in \"\(folder.path, privacy: .public)\"")
                 }
+                remaining -= 1
+                guard remaining == 0, let self else { return }
+                let message = Self.folderToastMessage(added: counts.added,
+                                                      duplicates: counts.duplicates,
+                                                      onDisk: counts.onDisk,
+                                                      rejected: counts.rejected)
+                guard !message.isEmpty else { return }
+                AppLog.ui.info("folder download \"\(folder.path, privacy: .public)\": \(message, privacy: .public)")
+                Theme.showToast(message, in: self.view)
             }
-        }
-        // The completion callbacks hop to the main queue, so by now every enqueue has been
-        // counted; a single honest summary must not fire before that.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            let message = Self.folderToastMessage(added: added, duplicates: duplicates,
-                                                  onDisk: completedAlready, rejected: rejected)
-            guard !message.isEmpty else { return }
-            AppLog.ui.info("folder download \"\(folder.path, privacy: .public)\": \(message, privacy: .public)")
-            Theme.showToast(message, in: self.view)
         }
     }
 

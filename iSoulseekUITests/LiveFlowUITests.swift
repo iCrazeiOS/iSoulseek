@@ -88,6 +88,46 @@ final class LiveFlowUITests: XCTestCase {
                       "no visible transfer on the Transfers screen right after queueing")
     }
 
+    /// Downloads a whole album from a browsed share and expects one honest summary toast.
+    /// Guards the regression where the summary ran before the enqueues were counted and no
+    /// toast appeared at all.
+    func testAlbumDownloadShowsASummaryToast() throws {
+        let environment = ProcessInfo.processInfo.environment
+        signInIfNeeded(username: environment["SOULSEEK_LIVE_USER"] ?? "",
+                       password: environment["SOULSEEK_LIVE_PASS"] ?? "")
+
+        let searchTab = app.tabBars.buttons["Search"]
+        XCTAssertTrue(searchTab.waitForExistence(timeout: 60), "never reached the main tabs")
+
+        let searchField = app.searchFields.firstMatch
+        XCTAssertTrue(searchField.waitForExistence(timeout: 10), "no search field")
+        searchField.tap()
+        try focusAndSearch("flac")
+
+        let result = app.cells["search.result"].firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 90), "no search result arrived")
+        result.tap()
+
+        let browseAction = app.sheets.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH 'Browse'")
+        ).firstMatch
+        XCTAssertTrue(browseAction.waitForExistence(timeout: 5), "no browse action in the sheet")
+        browseAction.tap()
+
+        // The first folder header with files offers its own Download button.
+        let headerDownload = app.buttons.matching(
+            NSPredicate(format: "label == 'Download' AND isEnabled == true")
+        ).firstMatch
+        XCTAssertTrue(headerDownload.waitForExistence(timeout: 90),
+                      "the browsed share never showed a downloadable folder")
+
+        headerDownload.tap()
+        let toast = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS 'Queued' OR label CONTAINS 'already' OR label CONTAINS 'could not be added'")
+        ).firstMatch
+        XCTAssertTrue(toast.waitForExistence(timeout: 15), "no summary toast appeared for the album download")
+    }
+
 
     /// Types `query` into the search field and submits it, retrying the tap when the first focus
     /// misses. The search key is tapped explicitly; the trailing newline of `typeText` does not
