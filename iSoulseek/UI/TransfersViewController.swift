@@ -20,6 +20,9 @@ final class TransfersViewController: UIViewController {
     private let messageView = MessageView()
 
     private var transfers: [Transfer] = []
+    /// Failed downloads kept on the Downloading tab so their reason is visible; cleared when the
+    /// screen is left.
+    private var failedDownloads = FailedDownloadLog()
     private var downloadedFiles: [DownloadedFile] = []
     private var displayed: [Item] = []
     private var scanScheduled = false
@@ -147,6 +150,14 @@ final class TransfersViewController: UIViewController {
         navigationController?.setToolbarHidden(true, animated: animated)
     }
 
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // Failure rows are transient help for the current visit; leaving the screen clears them.
+        guard !failedDownloads.transfers.isEmpty else { return }
+        failedDownloads.clear()
+        rebuild()
+    }
+
     private func configureLayout() {
         tabControl.selectedSegmentIndex = client.store.transferTab.rawValue
         tabControl.addTarget(self, action: #selector(tabChanged), for: .valueChanged)
@@ -242,7 +253,9 @@ final class TransfersViewController: UIViewController {
             }
         } else {
             transfers.removeAll { $0.id == transfer.id }
-            if existed {
+            if !transfer.isUpload, case .failed(let reason) = transfer.state {
+                surfaceFailedDownload(transfer, reason: reason)
+            } else if existed {
                 if transfer.isUpload {
                     AppLog.ui.info("uploads list: row dropped for #\(transfer.id, privacy: .public) \"\(transfer.localFilename, privacy: .public)\" (\(transfer.stateDescription, privacy: .public))")
                 } else {
@@ -252,6 +265,25 @@ final class TransfersViewController: UIViewController {
             }
             if !transfer.isUpload { scheduleDownloadedFilesReload() }
         }
+    }
+
+    /// Failed downloads are dropped by the transfer manager the moment they fail, which used to
+    /// make them vanish before the "queued" toast had even gone. Keep the row on the Downloading
+    /// tab (replacing an older entry for the same transfer) and explain what happened.
+    private func surfaceFailedDownload(_ transfer: Transfer, reason: String) {
+        if failedDownloads.record(transfer) {
+            AppLog.ui.info("downloads list: failure surfaced for #\(transfer.id, privacy: .public) \"\(transfer.localFilename, privacy: .public)\" — \(reason, privacy: .public)")
+            Theme.showToast(Self.failureToastMessage(username: transfer.username, reason: reason), in: view)
+        }
+        rebuild()
+    }
+
+    /// The toast for a failed download. Connection failures dominate, so they get a friendlier,
+    /// more actionable wording than the raw reason.
+    private static func failureToastMessage(username: String, reason: String) -> String {
+        reason.hasPrefix("Could not connect to ")
+            ? "Download failed — couldn't connect to \(username). They may be offline."
+            : "Download failed: \(reason)"
     }
 
     private func updateVisibleTransfer(_ transfer: Transfer) {
@@ -311,7 +343,9 @@ final class TransfersViewController: UIViewController {
 
         switch currentTab {
         case .downloading:
-            displayed = downloads.map(Item.transfer)
+            // Failed downloads lead the list so users can see why a transfer vanished before the
+            // active rows push them down; failures live in FailedDownloadLog, not the client.
+            displayed = (failedDownloads.transfers + downloads).map(Item.transfer)
         case .downloaded:
             displayed = downloadedItems(from: downloaded)
         case .uploading:

@@ -188,6 +188,72 @@ final class ConnectionIntegrationTests: XCTestCase {
         }
     }
 
+    // MARK: Session pool hygiene
+
+    /// Thirty-two stale inbound sessions left behind by peers pushing search results used to
+    /// exhaust the session cap and make new downloads fail instantly with "Could not connect".
+    /// Eviction must free a slot instead of refusing the request.
+    func testDownloadSucceedsWhenSessionPoolIsFullOfStaleInboundSessions() {
+        let payload = Data(0..<255) + Data(0..<255)
+        env.peer.downloadPayload = payload
+        XCTAssertTrue(env.connectAndWaitForLogin())
+        assertEventually("client never advertised a listening port", timeout: 3) {
+            env.server.clientListeningPort > 0
+        }
+
+        // Fill the pool the way the real network does: one inbound session per distinct user,
+        // each dialing only to push a search response for a token we never asked about.
+        let stalePeers: [MockPeer] = (1...SoulseekClient.maximumPeerSessions).map { index in
+            let pusher = MockPeer()
+            pusher.server = env.server
+            pusher.username = "StalePusher\(index)"
+            pusher.searchFiles = [ShareFile(name: "ignored.mp3", size: 1)]
+            pusher.searchTokenOverride = UInt32(0x7FFF_0000 + index)
+            return pusher
+        }
+        for pusher in stalePeers { pusher.sendSearchResponse(token: 0xDEAD_BEEF) }
+        assertEventually("stale inbound sessions were never opened", timeout: 8) {
+            env.client.peerSessionCount == SoulseekClient.maximumPeerSessions
+        }
+        defer { stalePeers.forEach { $0.stop() } }
+
+        var transfers: [Transfer] = []
+        let cancellable = env.client.transferChanges.sink { transfers.append($0) }
+        defer { cancellable.cancel() }
+
+        env.client.download(username: "MockPeer", filename: "Music\\pooled.bin",
+                            size: UInt64(payload.count))
+
+        assertEventually("download never started despite eviction", timeout: 5) {
+            transfers.contains { !$0.isUpload && $0.state == .transferring }
+        }
+        assertEventually("download never completed", timeout: 5) {
+            transfers.contains { !$0.isUpload && $0.state == .completed }
+        }
+        let destination = env.downloadsDirectory.appendingPathComponent("MockPeer/Music/pooled.bin")
+        assertEventually("file was not written", timeout: 5) {
+            (try? Data(contentsOf: destination)) == payload
+        }
+    }
+
+    /// Sessions left behind by result-pushing peers must not occupy the pool for good: the
+    /// keepalive reaper closes idle ones that owe no work.
+    func testReaperClosesIdleSessionsWithoutPendingWork() {
+        XCTAssertTrue(env.connectAndWaitForLogin())
+        env.client.idleSessionLifetime = 0.3
+
+        env.peer.sendSearchResponse(token: 0x7FFF_0001)
+        assertEventually("inbound session was never opened", timeout: 5) {
+            env.client.peerSessionCount == 1
+        }
+
+        // The reaper is also triggered here on demand, as the keepalive timer does.
+        assertEventually("the reaper never closed the idle session", timeout: 5) {
+            env.client.reapIdleSessions()
+            return env.client.peerSessionCount == 0
+        }
+    }
+
     // MARK: Browse
 
     func testBrowseReturnsTree() {

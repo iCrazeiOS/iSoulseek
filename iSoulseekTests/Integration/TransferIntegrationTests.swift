@@ -46,8 +46,31 @@ final class TransferIntegrationTests: XCTestCase {
             (try? Data(contentsOf: destination))?.count == payload.count
         }
         XCTAssertEqual((try? Data(contentsOf: destination)), payload)
+        XCTAssertEqual(transfers.last(where: { !$0.isUpload })?.transferred, UInt64(payload.count),
+                       "the final update must carry the honest byte count, not a throttled one")
         XCTAssertTrue(env.client.transfers().isEmpty,
                       "completed downloads belong to the filesystem, not the transfer list")
+    }
+
+    /// A failed download must surface instead of vanishing: the failure state with its reason is
+    /// published even though the transfer manager drops failed transfers from its list, so the UI
+    /// can keep the row and explain what happened.
+    func testDeniedDownloadSurfacesItsFailure() {
+        env.peer.denyQueueUploadReason = "File not shared."
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        var transfers: [Transfer] = []
+        let cancellable = env.client.transferChanges.sink { transfers.append($0) }
+        defer { cancellable.cancel() }
+
+        env.client.download(username: "MockPeer", filename: "Music\\denied.bin", size: 100)
+
+        assertEventually("the download failure was never published", timeout: 3) {
+            transfers.contains { !$0.isUpload && $0.state == .failed("File not shared.") }
+        }
+        assertEventually("the failed transfer stayed in the transfer list", timeout: 3) {
+            env.client.transfers().isEmpty
+        }
     }
 
     /// Peers may omit the size and signal completion by closing the file connection.

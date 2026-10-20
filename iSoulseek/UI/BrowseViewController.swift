@@ -205,11 +205,36 @@ final class BrowseViewController: UIViewController {
                 }
             }
         }
-        // The completion hops to the main queue, so by now every enqueue has been counted.
-        DispatchQueue.main.async {
-            AppLog.ui.info("folder download \"\(folder.path, privacy: .public)\": \(added, privacy: .public) queued, \(duplicates, privacy: .public) duplicates, \(completedAlready, privacy: .public) already on disk, \(rejected, privacy: .public) rejected")
+        // The completion callbacks hop to the main queue, so by now every enqueue has been
+        // counted; a single honest summary must not fire before that.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let message = Self.folderToastMessage(added: added, duplicates: duplicates,
+                                                  onDisk: completedAlready, rejected: rejected)
+            guard !message.isEmpty else { return }
+            AppLog.ui.info("folder download \"\(folder.path, privacy: .public)\": \(message, privacy: .public)")
+            Theme.showToast(message, in: self.view)
         }
-        Theme.showToast("Queued \(folder.files.count) files", in: view)
+    }
+
+    /// A truthful summary of a folder download, where the old toast always claimed every file
+    /// was queued even when they were duplicates, already on disk or rejected outright.
+    private static func folderToastMessage(added: Int, duplicates: Int, onDisk: Int,
+                                           rejected: Int) -> String {
+        let total = added + duplicates + onDisk + rejected
+        guard total > 0 else { return "" }
+        if added == total { return total == 1 ? "Queued 1 file" : "Queued \(total) files" }
+        if duplicates == total { return "Already downloading all files" }
+        if onDisk == total { return "Already downloaded all files" }
+
+        var parts: [String] = []
+        if added > 0 { parts.append("Queued \(added)") }
+        if duplicates > 0 { parts.append("already downloading \(duplicates)") }
+        if onDisk > 0 { parts.append("already downloaded \(onDisk)") }
+        if rejected > 0 {
+            parts.append(rejected == 1 ? "1 file could not be added" : "\(rejected) files could not be added")
+        }
+        return parts.joined(separator: " · ")
     }
 }
 

@@ -734,7 +734,12 @@ final class TransferManager {
         download.timeout?.cancel()
         downloadsByKey.removeValue(forKey: download.key)
         downloadConnections.removeValue(forKey: id)?.cancel()
-        updateTransfer(id) { $0.state = .completed }
+        // Progress reports are throttled, so the last visible state may lag behind; publish the
+        // honest final byte count together with the completed state.
+        updateTransfer(id) {
+            $0.transferred = download.transferred
+            $0.state = .completed
+        }
         discardDownload(id)
         if !hasPendingWork(username: download.username) {
             onUserWorkFinished?(download.username)
@@ -775,12 +780,18 @@ final class TransferManager {
     private func failDownload(username: String, filename: String, reason: String) {
         let key = Self.key(username: username, filename: filename)
         guard let id = downloadsByKey[key] else { return }
+        let lastBytes = downloads[id]?.transferred
         AppLog.transfers.error("download #\(id, privacy: .public) from \"\(username, privacy: .public)\": \"\(filename, privacy: .public)\" FAILED — \(reason, privacy: .public)")
         downloads.removeValue(forKey: id)
         downloadsByKey.removeValue(forKey: key)
         downloadConnections.removeValue(forKey: id)?.cancel()
         let handle = openHandles.removeValue(forKey: id)
-        updateTransfer(id) { $0.state = .failed(reason.isEmpty ? "Refused" : reason) }
+        // Publish the bytes that actually arrived; throttled progress otherwise leaves the row
+        // showing less than the partial file on disk holds.
+        updateTransfer(id) {
+            if let lastBytes { $0.transferred = lastBytes }
+            $0.state = .failed(reason.isEmpty ? "Refused" : reason)
+        }
         discardDownload(id)
         // The hidden partial is kept for a later resume, but the handle closes only after any
         // writes queued before the failure have run.
