@@ -36,6 +36,9 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_KEY_CFBundleDisplayName: iSoulseek
         ENABLE_TESTABILITY: YES
+      configs:
+        Release:
+          ENABLE_CODE_COVERAGE: NO
     info:
       path: iSoulseek/App/Info.plist
       properties:
