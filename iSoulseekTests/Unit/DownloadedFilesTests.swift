@@ -30,6 +30,12 @@ final class DownloadedFilesTests: XCTestCase {
         return url
     }
 
+    private func file(_ path: String, size: UInt64, modified: TimeInterval) -> DownloadedFile {
+        DownloadedFile(url: URL(fileURLWithPath: "/" + path), relativePath: path,
+                       name: URL(fileURLWithPath: path).lastPathComponent, size: size,
+                       modified: Date(timeIntervalSince1970: modified))
+    }
+
     func testScanListsRegularFilesRecursively() throws {
         _ = try write("single.flac", bytes: 3)
         _ = try write("Artist/Album/song.mp3", bytes: 5)
@@ -75,6 +81,61 @@ final class DownloadedFilesTests: XCTestCase {
                        ["A.flac", "C.flac", "B.flac"])
         XCTAssertEqual(DownloadSortOrder.name.sorted(files).map(\.name),
                        ["A.flac", "B.flac", "C.flac"])
+    }
+
+    func testTreeGroupsFilesByFolder() {
+        let files = [
+            file("Artist/Album/b.mp3", size: 2, modified: 100),
+            file("Artist/Album/a.mp3", size: 3, modified: 300),
+            file("Artist/loose.mp3", size: 4, modified: 200),
+            file("Zeta/z.flac", size: 5, modified: 400),
+            file("root.flac", size: 6, modified: 500),
+        ]
+        let root = DownloadTree.build(from: files, sortOrder: .oldest)
+
+        XCTAssertEqual(root.name, "Downloads")
+        XCTAssertEqual(root.folders.map(\.name), ["Artist", "Zeta"])
+        XCTAssertEqual(root.files.map(\.name), ["root.flac"])
+        XCTAssertEqual(root.fileCount, 5)
+        XCTAssertEqual(root.totalSize, 20)
+
+        let artist = root.folders[0]
+        XCTAssertEqual(artist.path, "Artist")
+        XCTAssertEqual(artist.folders.map(\.name), ["Album"])
+        XCTAssertEqual(artist.files.map(\.name), ["loose.mp3"])
+        XCTAssertEqual(artist.folders[0].path, "Artist/Album")
+        XCTAssertEqual(artist.folders[0].files.map(\.name), ["b.mp3", "a.mp3"])
+    }
+
+    func testTreeCollapsesIntermediateFolders() {
+        let files = [
+            file("user/Music/Artist/Album/song.mp3", size: 1, modified: 200),
+            file("user/Music/Other/Album/other.mp3", size: 2, modified: 100),
+            file("user/top.mp3", size: 3, modified: 300),
+        ]
+        let root = DownloadTree.build(from: files, sortOrder: .oldest)
+
+        XCTAssertEqual(root.folders.map(\.name), ["user"])
+        let user = root.folders[0]
+        XCTAssertEqual(user.path, "user")
+        XCTAssertEqual(user.folders.map(\.name), ["Album"])
+        XCTAssertEqual(user.folders[0].path, "user/Album")
+        XCTAssertEqual(user.folders[0].files.map(\.name), ["other.mp3", "song.mp3"])
+        XCTAssertEqual(user.files.map(\.name), ["top.mp3"])
+        XCTAssertEqual(user.fileCount, 3)
+    }
+
+    func testLayoutPreferenceDefaultsToList() {
+        let suite = "DownloadedFilesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+
+        let store = SessionStore(defaults: defaults, keychainService: "test.\(suite)")
+        XCTAssertEqual(store.downloadLayout, .list)
+
+        store.downloadLayout = .tree
+        XCTAssertEqual(defaults.integer(forKey: "downloadLayout"), DownloadLayout.tree.rawValue)
+        XCTAssertEqual(store.downloadLayout, .tree)
     }
 
     func testDeleteRemovesFileAndEmptyParents() throws {

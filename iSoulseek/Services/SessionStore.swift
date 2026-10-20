@@ -11,6 +11,7 @@ final class SessionStore {
         static let status = "status"
         static let searchSortOrder = "searchSortOrder"
         static let downloadSortOrder = "downloadSortOrder"
+        static let downloadLayout = "downloadLayout"
     }
 
     static let defaultServerHost = "server.slsknet.org"
@@ -76,6 +77,11 @@ final class SessionStore {
             return DownloadSortOrder(rawValue: defaults.integer(forKey: Key.downloadSortOrder)) ?? .newest
         }
         set { defaults.set(newValue.rawValue, forKey: Key.downloadSortOrder) }
+    }
+
+    var downloadLayout: DownloadLayout {
+        get { DownloadLayout(rawValue: defaults.integer(forKey: Key.downloadLayout)) ?? .list }
+        set { defaults.set(newValue.rawValue, forKey: Key.downloadLayout) }
     }
 
     var isConfigured: Bool { !username.isEmpty && !password.isEmpty }
