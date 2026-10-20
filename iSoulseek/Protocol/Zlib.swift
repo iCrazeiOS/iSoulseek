@@ -21,7 +21,9 @@ enum Zlib {
         return Data(output[0..<Int(capacity)])
     }
 
-    static func decompress(_ data: Data, limit: Int) throws -> Data {
+    /// Inflates `data`, refusing to produce more than `limit` bytes unless `allowingPartial` is
+    /// set, in which case the prefix that fits is returned instead of throwing.
+    static func decompress(_ data: Data, limit: Int, allowingPartial: Bool = false) throws -> Data {
         guard !data.isEmpty, limit > 0 else { throw ProtocolError.compressionFailed }
 
         var stream = z_stream()
@@ -48,8 +50,13 @@ enum Zlib {
                 }
 
                 if produced > 0 {
-                    guard output.count + produced <= limit else {
-                        throw ProtocolError.decompressedTooLarge(limit: limit)
+                    let room = limit - output.count
+                    guard produced <= room else {
+                        guard allowingPartial else {
+                            throw ProtocolError.decompressedTooLarge(limit: limit)
+                        }
+                        if room > 0 { output.append(contentsOf: buffer[0..<room]) }
+                        return
                     }
                     output.append(contentsOf: buffer[0..<produced])
                 }

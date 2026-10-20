@@ -77,7 +77,7 @@ final class SoulseekClient {
     private var fileDialsInFlight: Set<String> = []
     private var addressCache: [String: (ip: String, port: UInt16, created: Date)] = [:]
     private var addressRequests: [String: [(String, UInt16) -> Void]] = [:]
-    private var browseRequests: [String: (Result<[ShareFolder], Error>) -> Void] = [:]
+    private var browseRequests: [String: [(Result<[ShareFolder], Error>) -> Void]] = [:]
     private var browseTimers: [String: DispatchWorkItem] = [:]
     private var searchTokens: Set<UInt32> = []
     private var searchResultCounts: [UInt32: Int] = [:]
@@ -166,21 +166,19 @@ final class SoulseekClient {
                 self.replyToMain { completion(.failure(SoulseekError.notConnected)) }
                 return
             }
-            guard self.browseRequests[key] == nil else { return }
-            self.browseRequests[key] = completion
+            self.browseRequests[key, default: []].append(completion)
+            guard self.browseRequests[key]?.count == 1 else { return }
 
             self.provideSession(username: username) { [weak self] session in
                 guard let self else { return }
                 guard let session else {
-                    if let pending = self.browseRequests.removeValue(forKey: key) {
-                        self.replyToMain { pending(.failure(SoulseekError.peerUnavailable(username))) }
-                    }
+                    self.finishBrowse(key: key, with: .failure(SoulseekError.peerUnavailable(username)))
                     return
                 }
                 session.send(.getShareFileList)
                 let timer = DispatchWorkItem { [weak self] in
-                    guard let self, let pending = self.browseRequests.removeValue(forKey: key) else { return }
-                    self.replyToMain { pending(.failure(SoulseekError.timedOut)) }
+                    guard let self else { return }
+                    self.finishBrowse(key: key, with: .failure(SoulseekError.timedOut))
                     self.releaseSessionIfIdle(username: username)
                 }
                 self.browseTimers[key] = timer
@@ -189,9 +187,25 @@ final class SoulseekClient {
         }
     }
 
+    /// Completes every browse outstanding for `key` with `result`, on the main queue. Safe to call
+    /// when nothing is pending, so a late close or timeout cannot deliver a second time.
+    private func finishBrowse(key: String, with result: Result<[ShareFolder], Error>) {
+        browseTimers.removeValue(forKey: key)?.cancel()
+        let waiters = browseRequests.removeValue(forKey: key) ?? []
+        guard !waiters.isEmpty else { return }
+        replyToMain {
+            for waiter in waiters { waiter(result) }
+        }
+    }
+
     func download(username: String, filename: String, size: UInt64,
                   completion: ((DownloadStartResult?) -> Void)? = nil) {
         queue.async {
+            // Retire any previous failure for this file before queueing it again, so a failure
+            // from this attempt (which is recorded later) is not mistaken for the stale one.
+            self.replyToMain {
+                self.retireFailedDownload(username: username, filename: filename)
+            }
             AppLog.transfers.info("download requested from \"\(username, privacy: .public)\": \"\(filename, privacy: .public)\" (size \(size, privacy: .public))")
             let result = self.transferManager.enqueueDownload(username: username,
                                                               filename: filename, size: size)
@@ -298,6 +312,9 @@ final class SoulseekClient {
         connection?.onClosed = nil
         connection?.cancel()
 
+        for token in searchTokens {
+            publish { self.searchFinished.send(token) }
+        }
         searchTokens.removeAll()
         searchResultCounts.removeAll()
         addressCache.removeAll()
@@ -553,7 +570,9 @@ final class SoulseekClient {
         }
         guard info.username.lowercased() != ownUsername.lowercased() else { return }
 
-        let key = info.username.lowercased()
+        // One dial is needed per transfer, so the key includes the transfer token; a repeated
+        // ConnectToPeer for the same transfer still deduplicates.
+        let key = "\(info.username.lowercased())\u{0}\(info.token)"
         guard !fileDialsInFlight.contains(key) else {
             AppLog.peers.debug("file dial to \"\(info.username, privacy: .public)\" already in flight")
             return
@@ -670,9 +689,8 @@ final class SoulseekClient {
             sessions.removeValue(forKey: key)
             sessionActivity.removeValue(forKey: key)
         }
-        if let pending = browseRequests.removeValue(forKey: key) {
-            browseTimers.removeValue(forKey: key)?.cancel()
-            replyToMain { pending(.failure(SoulseekError.peerUnavailable(session.username))) }
+        if browseRequests[key] != nil {
+            finishBrowse(key: key, with: .failure(SoulseekError.peerUnavailable(session.username)))
         }
         if sessions[key] == nil {
             failSessionRequests(key: key, reason: "session closed")
@@ -757,8 +775,26 @@ final class SoulseekClient {
         let open = sessions.values
         sessions.removeAll()
         sessionActivity.removeAll()
+
+        let sessionWaiters = sessionRequests.values
         sessionRequests.removeAll()
+        sessionTimeouts.values.forEach { $0.cancel() }
         sessionTimeouts.removeAll()
+
+        // Fail the browse waiters first so they report notConnected, before the session waiters
+        // they registered can fail them for a peer that was never reachable.
+        for key in Array(browseRequests.keys) {
+            finishBrowse(key: key, with: .failure(SoulseekError.notConnected))
+        }
+        for waiters in sessionWaiters {
+            for waiter in waiters { waiter(nil) }
+        }
+        let addressWaiters = addressRequests.values
+        addressRequests.removeAll()
+        for waiters in addressWaiters {
+            for waiter in waiters { waiter("", 0) }
+        }
+
         for session in open { session.close() }
     }
 
@@ -794,10 +830,7 @@ final class SoulseekClient {
         sessionActivity[key] = Date()
         switch message {
         case .sharedFileList(let folders):
-            browseTimers.removeValue(forKey: key)?.cancel()
-            if let pending = browseRequests.removeValue(forKey: key) {
-                replyToMain { pending(.success(folders)) }
-            }
+            finishBrowse(key: key, with: .success(folders))
             releaseSessionIfIdle(username: session.username)
 
         case .getShareFileList:
@@ -843,7 +876,8 @@ final class SoulseekClient {
 
     /// Cheap token check on the first few bytes, before the whole response is inflated.
     private func isWantedSearchResponse(_ payload: Data) -> Bool {
-        guard let prefix = try? Zlib.decompress(payload, limit: 4096) else { return false }
+        guard let prefix = try? Zlib.decompress(payload, limit: 4096,
+                                               allowingPartial: true) else { return false }
         var reader = ByteReader(prefix)
         guard (try? reader.readString()) != nil, let token = try? reader.readUInt32() else { return false }
         return searchTokens.contains(token)
@@ -890,8 +924,9 @@ final class SoulseekClient {
         failedDownloadEvents.send(transfer)
     }
 
-    /// Retires the failure entry for a file the user queued again, so the live transfer replaces
-    /// the stale failure row on the Transfers screen. Main queue only, like all mutations.
+    /// Retires the failure entry for a file that was queued again (from any screen), so the live
+    /// transfer replaces the stale failure row instead of both showing. Main queue only, like all
+    /// mutations.
     func retireFailedDownload(username: String, filename: String) {
         recentFailedDownloads.drop(username: username, filename: filename)
     }

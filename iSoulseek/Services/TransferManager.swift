@@ -77,6 +77,7 @@ final class TransferManager {
     private var downloadConnections: [UInt32: SocketConnection] = [:]
     private var openHandles: [UInt32: FileHandle] = [:]
     private var progressMarks: [UInt32: Date] = [:]
+    private var speedMarks: [UInt32: (start: Date, bytes: UInt64)] = [:]
 
     private var uploads: [UInt32: PendingUpload] = [:]
     private var uploadsByKey: [String: UInt32] = [:]
@@ -214,14 +215,10 @@ final class TransferManager {
             }
             return
         }
-        if let upload = uploads.removeValue(forKey: id) {
-            upload.timeout?.cancel()
-            uploadsByKey.removeValue(forKey: upload.key)
-            uploadQueue.removeAll { $0 == id }
-            pendingUploadPierce = pendingUploadPierce.filter { $0.value != id }
-            uploadConnections.removeValue(forKey: id)?.cancel()
+        if uploads[id] != nil {
             updateTransfer(id) { $0.state = .cancelled }
-            pumpUploadQueue()
+            teardownUpload(id)
+            uploadConnections.removeValue(forKey: id)?.cancel()
             return
         }
         updateTransfer(id) { $0.state = .cancelled }
@@ -247,6 +244,8 @@ final class TransferManager {
         uploadQueue.removeAll()
         uploadConnections.removeAll()
         pendingUploadPierce.removeAll()
+        speedMarks.removeAll()
+        progressMarks.removeAll()
         activeUploads = 0
         transfers.removeAll()
     }
@@ -292,7 +291,17 @@ final class TransferManager {
         download.awaitingFileConnection = true
         if let size = info.size, size > 0 {
             download.expectedSize = size
-            updateTransfer(id) { $0.size = size }
+            if download.offset > size {
+                AppLog.transfers.info("download #\(id, privacy: .public) resume offset \(download.offset, privacy: .public) is past peer size \(size, privacy: .public); restarting from zero")
+                download.offset = 0
+                download.transferred = 0
+                updateTransfer(id) {
+                    $0.transferred = 0
+                    $0.size = size
+                }
+            } else {
+                updateTransfer(id) { $0.size = size }
+            }
         }
         downloads[id] = download
         session.send(.transferResponse(TransferResponseInfo(token: info.token, isAllowed: true,
@@ -680,13 +689,33 @@ final class TransferManager {
         do {
             try fileManager.createDirectory(at: destination.deletingLastPathComponent(),
                                             withIntermediateDirectories: true)
-            if fileManager.fileExists(atPath: destination.path) {
-                try fileManager.removeItem(at: destination)
+            var target = destination
+            var isDirectory: ObjCBool = false
+            if fileManager.fileExists(atPath: destination.path, isDirectory: &isDirectory) {
+                if isDirectory.boolValue {
+                    target = freeSiblingURL(for: destination, in: fileManager)
+                } else {
+                    try fileManager.removeItem(at: destination)
+                }
             }
-            try fileManager.moveItem(at: source, to: destination)
+            try fileManager.moveItem(at: source, to: target)
             return true
         } catch {
             return false
+        }
+    }
+
+    /// Picks an unused name for a directory the download would otherwise replace, e.g. `Album (2)`.
+    private static func freeSiblingURL(for url: URL, in fileManager: FileManager) -> URL {
+        let directory = url.deletingLastPathComponent()
+        let base = url.deletingPathExtension().lastPathComponent
+        let ext = url.pathExtension
+        var index = 2
+        while true {
+            let name = ext.isEmpty ? "\(base) (\(index))" : "\(base) (\(index)).\(ext)"
+            let candidate = directory.appendingPathComponent(name)
+            if !fileManager.fileExists(atPath: candidate.path) { return candidate }
+            index += 1
         }
     }
 
@@ -840,6 +869,7 @@ final class TransferManager {
     private func discardDownload(_ id: UInt32) {
         transfers.removeAll { $0.id == id }
         progressMarks.removeValue(forKey: id)
+        speedMarks.removeValue(forKey: id)
         peerTokenToDownload = peerTokenToDownload.filter { $0.value != id }
     }
 
@@ -852,6 +882,24 @@ final class TransferManager {
     private func updateTransfer(_ id: UInt32, _ mutate: (inout Transfer) -> Void) {
         guard let index = transfers.firstIndex(where: { $0.id == id }) else { return }
         mutate(&transfers[index])
+        if transfers[index].state == .transferring {
+            let transferred = transfers[index].transferred
+            let now = Date()
+            if let mark = speedMarks[id] {
+                let elapsed = now.timeIntervalSince(mark.start)
+                if elapsed >= 1.0 {
+                    if transferred >= mark.bytes {
+                        transfers[index].averageSpeed = UInt64(Double(transferred - mark.bytes) / elapsed)
+                    } else {
+                        speedMarks[id] = (start: now, bytes: transferred)
+                    }
+                }
+            } else {
+                speedMarks[id] = (start: now, bytes: transferred)
+            }
+        } else {
+            speedMarks.removeValue(forKey: id)
+        }
         onUpdate?(transfers[index])
     }
 

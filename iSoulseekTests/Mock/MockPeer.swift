@@ -30,7 +30,9 @@ final class MockPeer {
     /// When false, the transfer request omits the size and the connection is closed when the
     /// payload has been sent, which is how some peers signal completion.
     var downloadReportsSize = true
-    var downloadToken: UInt32 = 0x0FFF_0001
+    /// Transfer token for download offers. Each offer gets a fresh token so a peer can tell
+    /// concurrent transfers apart, as a real uploader does.
+    private var nextDownloadToken: UInt32 = 0x0FFF_0001
     /// When true, the mock refuses the direct route and makes the client dial it back instead.
     var downloadViaIndirect = false
     /// When set, QueueUpload requests are answered with UploadDenied carrying this reason.
@@ -319,7 +321,10 @@ final class MockPeer {
             }
             var request = MockWriter()
             request.u32(1) // direction = upload
-            request.u32(downloadToken)
+            let token = nextDownloadToken
+            nextDownloadToken &+= 1
+            if nextDownloadToken == 0 { nextDownloadToken = 1 }
+            request.u32(token)
             request.string(filename)
             if downloadReportsSize {
                 request.u64(UInt64(downloadPayload.count))

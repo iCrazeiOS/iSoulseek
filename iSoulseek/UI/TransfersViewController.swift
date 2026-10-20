@@ -245,11 +245,6 @@ final class TransfersViewController: UIViewController {
             } else {
                 transfers.append(transfer)
                 AppLog.ui.debug("downloads list: row appeared for #\(transfer.id, privacy: .public) \"\(transfer.localFilename, privacy: .public)\" (\(transfer.stateDescription, privacy: .public))")
-                if !transfer.isUpload {
-                    // The user queued this file again; the live row replaces a stale failure.
-                    client.retireFailedDownload(username: transfer.username,
-                                                filename: transfer.filename)
-                }
                 if isVisible { rebuild() } else { refreshTabTitles() }
             }
         } else {
@@ -610,6 +605,9 @@ final class TransfersViewController: UIViewController {
             for transfer in selected where !transfer.isUpload {
                 guard let url = PathSanitizer.downloadDestination(in: root, username: transfer.username,
                                                           virtualPath: transfer.filename) else { continue }
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                      !isDirectory.boolValue else { continue }
                 urls.insert(url.standardizedFileURL)
             }
         }
