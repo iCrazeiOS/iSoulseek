@@ -98,9 +98,11 @@ final class BrowseViewController: UIViewController {
             guard let self else { return }
             switch result {
             case .success(let folders):
-                self.folders = folders.sorted {
-                    $0.path.localizedStandardCompare($1.path) == .orderedAscending
-                }
+                self.folders = folders
+                    .map { ShareFolder(path: $0.path, files: $0.filesInNaturalOrder) }
+                    .sorted {
+                        $0.path.localizedStandardCompare($1.path) == .orderedAscending
+                    }
                 if let focusedFolder = self.focusedFolder,
                    let index = self.folders.firstIndex(where: {
                        $0.path.caseInsensitiveCompare(focusedFolder) == .orderedSame
@@ -171,12 +173,16 @@ final class BrowseViewController: UIViewController {
             guard let self else { return }
             switch outcome {
             case .added:
+                AppLog.ui.info("browse download accepted: \"\(path, privacy: .public)\" from \"\(self.username, privacy: .public)\"")
                 Theme.showToast("Added \(file.name) to downloads", in: self.view)
             case .alreadyDownloading:
+                AppLog.ui.debug("browse download already active: \"\(path, privacy: .public)\"")
                 Theme.showToast("Already downloading \(file.name)", in: self.view)
             case .alreadyDownloaded:
+                AppLog.ui.debug("browse download already completed: \"\(path, privacy: .public)\"")
                 Theme.showToast("Already downloaded \(file.name)", in: self.view)
             case nil:
+                AppLog.ui.error("browse download REJECTED outright: \"\(path, privacy: .public)\" from \"\(self.username, privacy: .public)\"")
                 Theme.showToast("Could not download \(file.name)", in: self.view)
             }
         }
@@ -184,10 +190,54 @@ final class BrowseViewController: UIViewController {
 
     private func download(folder: ShareFolder) {
         guard !folder.files.isEmpty else { return }
+
+        // Every completion is replied on the main queue, so plain counting there is race-free.
+        // The summary waits until all of them arrived: scheduling it eagerly would run before the
+        // enqueues have even reached the client queue and show nothing.
+        var counts = (added: 0, duplicates: 0, onDisk: 0, rejected: 0)
+        var remaining = folder.files.count
         for file in folder.files {
-            client.download(username: username, filename: folder.path + "\\" + file.name, size: file.size)
+            client.download(username: username, filename: folder.path + "\\" + file.name,
+                            size: file.size) { [weak self] outcome in
+                switch outcome {
+                case .added: counts.added += 1
+                case .alreadyDownloading: counts.duplicates += 1
+                case .alreadyDownloaded: counts.onDisk += 1
+                case nil:
+                    counts.rejected += 1
+                    AppLog.ui.error("folder download REJECTED outright: \(file.name, privacy: .public) in \"\(folder.path, privacy: .public)\"")
+                }
+                remaining -= 1
+                guard remaining == 0, let self else { return }
+                let message = Self.folderToastMessage(added: counts.added,
+                                                      duplicates: counts.duplicates,
+                                                      onDisk: counts.onDisk,
+                                                      rejected: counts.rejected)
+                guard !message.isEmpty else { return }
+                AppLog.ui.info("folder download \"\(folder.path, privacy: .public)\": \(message, privacy: .public)")
+                Theme.showToast(message, in: self.view)
+            }
         }
-        Theme.showToast("Queued \(folder.files.count) files", in: view)
+    }
+
+    /// A truthful summary of a folder download, where the old toast always claimed every file
+    /// was queued even when they were duplicates, already on disk or rejected outright.
+    private static func folderToastMessage(added: Int, duplicates: Int, onDisk: Int,
+                                           rejected: Int) -> String {
+        let total = added + duplicates + onDisk + rejected
+        guard total > 0 else { return "" }
+        if added == total { return total == 1 ? "Queued 1 file" : "Queued \(total) files" }
+        if duplicates == total { return "Already downloading all files" }
+        if onDisk == total { return "Already downloaded all files" }
+
+        var parts: [String] = []
+        if added > 0 { parts.append("Queued \(added)") }
+        if duplicates > 0 { parts.append("already downloading \(duplicates)") }
+        if onDisk > 0 { parts.append("already downloaded \(onDisk)") }
+        if rejected > 0 {
+            parts.append(rejected == 1 ? "1 file could not be added" : "\(rejected) files could not be added")
+        }
+        return parts.joined(separator: " · ")
     }
 }
 

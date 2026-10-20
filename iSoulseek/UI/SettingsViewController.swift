@@ -124,6 +124,9 @@ final class SettingsViewController: UIViewController {
         let search = [
             Item(title: "Sort results", value: store.searchSortOrder.displayName,
                  accessory: .disclosureIndicator, action: { [weak self] in self?.chooseSortOrder() }),
+            Item(title: "Search filters", subtitle: store.searchOptions.summary,
+                 accessory: .disclosureIndicator, style: .subtitle,
+                 action: { [weak self] in self?.editSearchOptions() }),
         ]
 
         let shares = [
@@ -147,7 +150,7 @@ final class SettingsViewController: UIViewController {
             Section(header: "Connection", footer: nil, items: connection),
             Section(header: "Account", footer: nil, items: account),
             Section(header: "Search results",
-                    footer: "Applied to every search. You can also change the order from the search screen.",
+                    footer: "Applied to every search. You can also change these from the search screen.",
                     items: search),
             Section(header: "Shares",
                     footer: "Anything placed in this folder is shared with every user who browses you. "
@@ -220,6 +223,14 @@ final class SettingsViewController: UIViewController {
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         Theme.configurePopover(alert, in: tableView)
         present(alert, animated: true)
+    }
+
+    private func editSearchOptions() {
+        let controller = SearchOptionsViewController(options: client.store.searchOptions) { [weak self] options in
+            self?.client.store.searchOptions = options
+            self?.rebuild()
+        }
+        present(controller, animated: true)
     }
 
     private func promptForText(title: String, message: String?, current: String,

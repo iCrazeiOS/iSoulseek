@@ -93,4 +93,38 @@ final class TransferManagerTests: XCTestCase {
             !FileManager.default.fileExists(atPath: partial.path)
         }
     }
+
+    // MARK: Failure surfacing
+
+    /// A download whose session can never be established must publish its failure with a reason
+    /// before being dropped from the in-memory list; the Transfers screen keeps the row visible.
+    func testFailedDownloadIsPublishedThenDropped() {
+        var published: [Transfer] = []
+        manager.onUpdate = { published.append($0) }
+        manager.sessionProvider = { _, completion in completion(nil) }
+
+        guard case .added = manager.enqueueDownload(username: "alice",
+                                                    filename: "Music\\song.flac", size: 100) else {
+            return XCTFail("download was not queued")
+        }
+
+        XCTAssertEqual(published.count, 2, "the queued and failed states must both be published")
+        XCTAssertEqual(published.last?.state, .failed("Could not connect to alice"),
+                       "the failure must surface with its reason")
+        XCTAssertTrue(published.last.map { !$0.isUpload } ?? false)
+        XCTAssertTrue(manager.allTransfers.isEmpty,
+                      "failed transfers are dropped from the list; the UI keeps them visible")
+    }
+
+    func testFailedDownloadReleasesTheUserSession() {
+        var releasedUsernames: [String] = []
+        manager.onUserWorkFinished = { releasedUsernames.append($0) }
+        manager.sessionProvider = { _, completion in completion(nil) }
+
+        _ = manager.enqueueDownload(username: "alice", filename: "Music\\song.flac", size: 100)
+
+        assertEventually("the failed download did not release the user's session") {
+            releasedUsernames == ["alice"]
+        }
+    }
 }

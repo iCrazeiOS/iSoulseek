@@ -33,6 +33,8 @@ final class MockPeer {
     var downloadToken: UInt32 = 0x0FFF_0001
     /// When true, the mock refuses the direct route and makes the client dial it back instead.
     var downloadViaIndirect = false
+    /// When set, QueueUpload requests are answered with UploadDenied carrying this reason.
+    var denyQueueUploadReason: String?
 
     // Upload configuration: how many bytes we expect to receive when the client uploads to us.
     var uploadExpectedSize = 0
@@ -308,6 +310,13 @@ final class MockPeer {
         case 43: // QueueUpload
             guard let filename = try? reader.string() else { return }
             recordedQueueUploads.append(filename)
+            if let reason = denyQueueUploadReason {
+                var denial = MockWriter()
+                denial.string(filename)
+                denial.string(reason)
+                channel.send(code: 50, payload: denial.data)
+                return
+            }
             var request = MockWriter()
             request.u32(1) // direction = upload
             request.u32(downloadToken)

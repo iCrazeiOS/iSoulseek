@@ -31,9 +31,15 @@ final class DownloadedFilesTests: XCTestCase {
     }
 
     private func file(_ path: String, size: UInt64, modified: TimeInterval) -> DownloadedFile {
-        DownloadedFile(url: URL(fileURLWithPath: "/" + path), relativePath: path,
-                       name: URL(fileURLWithPath: path).lastPathComponent, size: size,
-                       modified: Date(timeIntervalSince1970: modified))
+        let components = path.split(separator: "/")
+        return DownloadedFile(
+            url: URL(fileURLWithPath: "/" + path),
+            name: String(components.last ?? ""),
+            size: size,
+            modified: Date(timeIntervalSince1970: modified),
+            username: components.count > 1 ? String(components[0]) : nil,
+            album: components.count > 2 ? String(components[components.count - 2]) : nil
+        )
     }
 
     func testScanListsRegularFilesRecursively() throws {
@@ -42,17 +48,18 @@ final class DownloadedFilesTests: XCTestCase {
         _ = try write(".hidden", bytes: 1)
 
         let files = DownloadedFiles.scan(in: root)
-        XCTAssertEqual(files.map(\.relativePath).sorted(),
-                       ["Artist/Album/song.mp3", "single.flac"])
+        XCTAssertEqual(files.map(\.name).sorted(), ["single.flac", "song.mp3"])
 
-        let single = try XCTUnwrap(files.first { $0.relativePath == "single.flac" })
-        XCTAssertEqual(single.name, "single.flac")
-        XCTAssertEqual(single.folder, "Downloads")
+        let single = try XCTUnwrap(files.first { $0.name == "single.flac" })
+        XCTAssertNil(single.username, "files at the downloads root have no uploader")
+        XCTAssertNil(single.album)
+        XCTAssertEqual(single.location, "Downloads")
         XCTAssertEqual(single.size, 3)
 
-        let song = try XCTUnwrap(files.first { $0.relativePath == "Artist/Album/song.mp3" })
-        XCTAssertEqual(song.name, "song.mp3")
-        XCTAssertEqual(song.folder, "Artist / Album")
+        let song = try XCTUnwrap(files.first { $0.name == "song.mp3" })
+        XCTAssertEqual(song.username, "Artist")
+        XCTAssertEqual(song.album, "Album")
+        XCTAssertEqual(song.location, "Artist · Album")
         XCTAssertEqual(song.size, 5)
     }
 
@@ -60,19 +67,19 @@ final class DownloadedFilesTests: XCTestCase {
         _ = try write(".partials/Artist/Album/song.mp3", bytes: 5)
         _ = try write("complete.flac", bytes: 3)
 
-        XCTAssertEqual(DownloadedFiles.scan(in: root).map(\.relativePath), ["complete.flac"])
+        XCTAssertEqual(DownloadedFiles.scan(in: root).map(\.name), ["complete.flac"])
     }
 
     func testSortOrders() {
-        let newest = DownloadedFile(url: URL(fileURLWithPath: "/A.flac"), relativePath: "A.flac",
-                                    name: "A.flac", size: 1,
-                                    modified: Date(timeIntervalSince1970: 300))
-        let oldest = DownloadedFile(url: URL(fileURLWithPath: "/B.flac"), relativePath: "B.flac",
-                                    name: "B.flac", size: 2,
-                                    modified: Date(timeIntervalSince1970: 100))
-        let middle = DownloadedFile(url: URL(fileURLWithPath: "/C.flac"), relativePath: "C.flac",
-                                    name: "C.flac", size: 3,
-                                    modified: Date(timeIntervalSince1970: 200))
+        let newest = DownloadedFile(url: URL(fileURLWithPath: "/A.flac"), name: "A.flac", size: 1,
+                                    modified: Date(timeIntervalSince1970: 300),
+                                    username: nil, album: nil)
+        let oldest = DownloadedFile(url: URL(fileURLWithPath: "/B.flac"), name: "B.flac", size: 2,
+                                    modified: Date(timeIntervalSince1970: 100),
+                                    username: nil, album: nil)
+        let middle = DownloadedFile(url: URL(fileURLWithPath: "/C.flac"), name: "C.flac", size: 3,
+                                    modified: Date(timeIntervalSince1970: 200),
+                                    username: nil, album: nil)
         let files = [newest, oldest, middle]
 
         XCTAssertEqual(DownloadSortOrder.oldest.sorted(files).map(\.name),

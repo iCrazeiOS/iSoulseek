@@ -4,13 +4,13 @@ import XCTest
 final class SearchSortOrderTests: XCTestCase {
 
     private func result(size: UInt64, bitrate: UInt32? = nil,
-                        duration: UInt32? = nil) -> SearchResult {
+                        duration: UInt32? = nil, speed: UInt32 = 0) -> SearchResult {
         var attributes: [UInt32: UInt32] = [:]
         if let bitrate { attributes[SearchAttribute.bitrate.rawValue] = bitrate }
         if let duration { attributes[SearchAttribute.duration.rawValue] = duration }
         return SearchResult(username: "u", token: 1,
                             file: ShareFile(name: "a.bin", size: size, attributes: attributes),
-                            isSlotFree: true, averageSpeed: 0, queueLength: 0)
+                            isSlotFree: true, averageSpeed: speed, queueLength: 0)
     }
 
     func testArrivalNeverReorders() {
@@ -37,6 +37,15 @@ final class SearchSortOrderTests: XCTestCase {
                                                               result(size: 1, duration: 100)))
         XCTAssertFalse(SearchSortOrder.duration.isOrderedBefore(result(size: 1, duration: 100),
                                                                result(size: 1, duration: 200)))
+    }
+
+    func testSpeedOrderingTreatsMissingAsZero() {
+        XCTAssertTrue(SearchSortOrder.fastest.isOrderedBefore(result(size: 1, speed: 500),
+                                                             result(size: 1, speed: 100)))
+        XCTAssertFalse(SearchSortOrder.fastest.isOrderedBefore(result(size: 1, speed: 100),
+                                                              result(size: 1, speed: 500)))
+        XCTAssertFalse(SearchSortOrder.fastest.isOrderedBefore(result(size: 1, speed: 100),
+                                                              result(size: 1, speed: 100)))
     }
 
     func testSessionStoreRoundTrip() {

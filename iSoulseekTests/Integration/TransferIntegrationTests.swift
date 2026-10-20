@@ -46,8 +46,34 @@ final class TransferIntegrationTests: XCTestCase {
             (try? Data(contentsOf: destination))?.count == payload.count
         }
         XCTAssertEqual((try? Data(contentsOf: destination)), payload)
+        XCTAssertEqual(transfers.last(where: { !$0.isUpload })?.transferred, UInt64(payload.count),
+                       "the final update must carry the honest byte count, not a throttled one")
         XCTAssertTrue(env.client.transfers().isEmpty,
                       "completed downloads belong to the filesystem, not the transfer list")
+    }
+
+    /// A failed download must surface instead of vanishing: the failure state with its reason is
+    /// published even though the transfer manager drops failed transfers from its list, so the UI
+    /// can keep the row and explain what happened.
+    func testDeniedDownloadSurfacesItsFailure() {
+        env.peer.denyQueueUploadReason = "File not shared."
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        var transfers: [Transfer] = []
+        let cancellable = env.client.transferChanges.sink { transfers.append($0) }
+        defer { cancellable.cancel() }
+
+        env.client.download(username: "MockPeer", filename: "Music\\denied.bin", size: 100)
+
+        assertEventually("the download failure was never published", timeout: 3) {
+            transfers.contains { !$0.isUpload && $0.state == .failed("File not shared.") }
+        }
+        assertEventually("the failed transfer stayed in the transfer list", timeout: 3) {
+            env.client.transfers().isEmpty
+        }
+        assertEventually("the failure was not kept in the session's failure log", timeout: 3) {
+            env.client.recentFailedDownloads.transfers.first?.state == .failed("File not shared.")
+        }
     }
 
     /// Peers may omit the size and signal completion by closing the file connection.
@@ -178,7 +204,8 @@ final class TransferIntegrationTests: XCTestCase {
             transfers.last(where: { !$0.isUpload })?.state == .completed
         }
 
-        let destination = env.downloadsDirectory.appendingPathComponent("MockPeer/Music/Album/deleteme.bin")
+        // The remote path was Music\Album\deleteme.bin: only the album folder is kept.
+        let destination = env.downloadsDirectory.appendingPathComponent("MockPeer/Album/deleteme.bin")
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
 
         DownloadedFiles.delete(destination, upTo: env.downloadsDirectory)
@@ -213,21 +240,22 @@ final class TransferIntegrationTests: XCTestCase {
             transfers.last(where: { $0.filename == secondFilename })?.state == .completed
         }
 
-        let first = env.downloadsDirectory.appendingPathComponent("MockPeer/Artist/Album/one.bin")
-        let second = env.downloadsDirectory.appendingPathComponent("MockPeer/Artist/Album/two.bin")
-        let album = env.downloadsDirectory.appendingPathComponent("MockPeer/Artist/Album")
-        let artist = env.downloadsDirectory.appendingPathComponent("MockPeer/Artist")
+        // Artist\Album\one.bin and two.bin share the album folder; the artist level is not kept.
+        let first = env.downloadsDirectory.appendingPathComponent("MockPeer/Album/one.bin")
+        let second = env.downloadsDirectory.appendingPathComponent("MockPeer/Album/two.bin")
+        let album = env.downloadsDirectory.appendingPathComponent("MockPeer/Album")
+        let uploader = env.downloadsDirectory.appendingPathComponent("MockPeer")
 
         DownloadedFiles.delete(first, upTo: env.downloadsDirectory)
         XCTAssertFalse(FileManager.default.fileExists(atPath: first.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: album.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: artist.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: uploader.path))
 
         DownloadedFiles.delete(second, upTo: env.downloadsDirectory)
         XCTAssertFalse(FileManager.default.fileExists(atPath: second.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: album.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: artist.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: uploader.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: env.downloadsDirectory.path),
                       "the downloads root must be kept")
     }

@@ -129,6 +129,13 @@ final class TransfersViewController: UIViewController {
             .sink { [weak self] transfer in self?.merge(transfer) }
             .store(in: &cancellables)
 
+        // Failures are recorded client-side for the whole session, so batch failures that
+        // predate this screen's opening still show up here on the next read.
+        client.failedDownloadEvents
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] transfer in self?.surfaceFailedDownload(transfer) }
+            .store(in: &cancellables)
+
         reloadActiveTransfers()
     }
 
@@ -237,15 +244,53 @@ final class TransfersViewController: UIViewController {
                 if isVisible { updateVisibleTransfer(transfer) }
             } else {
                 transfers.append(transfer)
+                AppLog.ui.debug("downloads list: row appeared for #\(transfer.id, privacy: .public) \"\(transfer.localFilename, privacy: .public)\" (\(transfer.stateDescription, privacy: .public))")
+                if !transfer.isUpload {
+                    // The user queued this file again; the live row replaces a stale failure.
+                    client.retireFailedDownload(username: transfer.username,
+                                                filename: transfer.filename)
+                }
                 if isVisible { rebuild() } else { refreshTabTitles() }
             }
         } else {
             transfers.removeAll { $0.id == transfer.id }
-            if existed {
+            if transfer.isFailedDownload {
+                // Already recorded and announced through `failedDownloadEvents`; this rebuild
+                // only keeps the row list consistent when the screen is visible.
+                if isVisible { rebuild() }
+            } else if existed {
+                if transfer.isUpload {
+                    AppLog.ui.info("uploads list: row dropped for #\(transfer.id, privacy: .public) \"\(transfer.localFilename, privacy: .public)\" (\(transfer.stateDescription, privacy: .public))")
+                } else {
+                    AppLog.ui.info("downloads list: row dropped for #\(transfer.id, privacy: .public) \"\(transfer.localFilename, privacy: .public)\" (\(transfer.stateDescription, privacy: .public))")
+                }
                 if isVisible { rebuild() } else { refreshTabTitles() }
             }
-            if !transfer.isUpload { scheduleDownloadedFilesReload() }
+            if !transfer.isUpload && !transfer.isFailedDownload {
+                scheduleDownloadedFilesReload()
+            }
         }
+    }
+
+    /// Failed downloads are dropped by the transfer manager the moment they fail, which used to
+    /// make them vanish before the "queued" toast had even gone. The client records them for the
+    /// session; this shows the row and, when this screen is on screen right now, a toast.
+    private func surfaceFailedDownload(_ transfer: Transfer) {
+        guard case .failed(let reason) = transfer.state else { return }
+        AppLog.ui.info("downloads list: failure surfaced for #\(transfer.id, privacy: .public) \"\(transfer.localFilename, privacy: .public)\" — \(reason, privacy: .public)")
+        if view.window != nil, !isSelecting {
+            Theme.showToast(Self.failureToastMessage(username: transfer.username, reason: reason),
+                            in: view)
+        }
+        rebuild()
+    }
+
+    /// The toast for a failed download. Connection failures dominate, so they get a friendlier,
+    /// more actionable wording than the raw reason.
+    private static func failureToastMessage(username: String, reason: String) -> String {
+        reason.hasPrefix("Could not connect to ")
+            ? "Download failed — couldn't connect to \(username). They may be offline."
+            : "Download failed: \(reason)"
     }
 
     private func updateVisibleTransfer(_ transfer: Transfer) {
@@ -305,7 +350,10 @@ final class TransfersViewController: UIViewController {
 
         switch currentTab {
         case .downloading:
-            displayed = downloads.map(Item.transfer)
+            // Failed downloads lead the list so users can see why a transfer vanished before the
+            // active rows push them down; failures live in the client's session log, which also
+            // records batches that failed before this screen was first opened.
+            displayed = (client.recentFailedDownloads.transfers + downloads).map(Item.transfer)
         case .downloaded:
             displayed = downloadedItems(from: downloaded)
         case .uploading:
@@ -386,7 +434,7 @@ final class TransfersViewController: UIViewController {
     /// Files still being downloaded are not downloaded yet, even though a partial file exists on disk.
     private func visibleDownloadedFiles(activeDownloads: [Transfer]) -> [DownloadedFile] {
         let activePaths = Set(activeDownloads.compactMap { transfer in
-            PathSanitizer.destination(in: client.store.downloadsDirectory,
+            PathSanitizer.downloadDestination(in: client.store.downloadsDirectory,
                                       username: transfer.username,
                                       virtualPath: transfer.filename)?.standardizedFileURL.path
         })
@@ -560,7 +608,7 @@ final class TransfersViewController: UIViewController {
             // A selected download may have finished while the user was selecting; remove its
             // completed file as well as cancelling the transfer.
             for transfer in selected where !transfer.isUpload {
-                guard let url = PathSanitizer.destination(in: root, username: transfer.username,
+                guard let url = PathSanitizer.downloadDestination(in: root, username: transfer.username,
                                                           virtualPath: transfer.filename) else { continue }
                 urls.insert(url.standardizedFileURL)
             }
@@ -837,7 +885,7 @@ private final class TransferCell: UITableViewCell {
         iconView.image = UIImage(systemName: symbol, withConfiguration: Self.iconConfiguration)
         iconView.tintColor = .secondaryLabel
         nameLabel.text = file.name
-        statusLabel.text = file.folder
+        statusLabel.text = file.location
         statusLabel.lineBreakMode = .byTruncatingMiddle
         statusLabel.isHidden = !showsFolder
         detailLabel.isHidden = false

@@ -143,6 +143,11 @@ final class SocketConnection {
     private func finish(with reason: String?) {
         guard !hasReportedClose else { return }
         hasReportedClose = true
+        if let reason {
+            AppLog.peers.debug("connection \"\(self.label, privacy: .public)\" failed: \(reason, privacy: .public)")
+        } else {
+            AppLog.peers.debug("connection \"\(self.label, privacy: .public)\" closed")
+        }
         connectTimeoutWorkItem?.cancel()
         connectTimeoutWorkItem = nil
         connection.stateUpdateHandler = nil

@@ -105,7 +105,10 @@ final class PeerSession {
 
     private func process(code: UInt32, payload: Data) {
         if let preDecodeFilter, !preDecodeFilter(code, payload) { return }
-        guard let message = try? PeerMessage.decode(code: code, payload: payload) else { return }
+        guard let message = try? PeerMessage.decode(code: code, payload: payload) else {
+            AppLog.peers.debug("peer \"\(self.username, privacy: .public)\": dropped undecodable message \(code, privacy: .public)")
+            return
+        }
         onMessage?(message)
     }
 

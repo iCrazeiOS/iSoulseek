@@ -10,6 +10,7 @@ final class SessionStore {
         static let listeningPort = "listeningPort"
         static let status = "status"
         static let searchSortOrder = "searchSortOrder"
+        static let searchOptions = "searchOptions"
         static let downloadSortOrder = "downloadSortOrder"
         static let downloadLayout = "downloadLayout"
         static let transferTab = "transferTab"
@@ -69,6 +70,20 @@ final class SessionStore {
         }
         set {
             defaults.set(newValue.rawValue, forKey: Key.searchSortOrder)
+        }
+    }
+
+    var searchOptions: SearchOptions {
+        get {
+            guard let data = defaults.data(forKey: Key.searchOptions),
+                  let options = try? JSONDecoder().decode(SearchOptions.self, from: data) else {
+                return SearchOptions()
+            }
+            return options
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            defaults.set(data, forKey: Key.searchOptions)
         }
     }
 
@@ -152,15 +167,17 @@ enum PathSanitizer {
         return result
     }
 
-    /// Returns a destination inside `root` under the uploader's username, or `nil` when the path
-    /// is unusable.
-    static func destination(in root: URL, username: String, virtualPath: String) -> URL? {
+    /// Returns where a download from `virtualPath` belongs, or `nil` when the path is unusable.
+    ///
+    /// Only the uploader and the album directory — the virtual path's final folder — are kept, so
+    /// the remote hierarchy is never recreated: `Music\Artist\Album\song.flac` becomes
+    /// `<root>/artist/Album/song.flac`. Files without a directory sit straight in the uploader's
+    /// folder. This is also the entire path metadata the app stores.
+    static func downloadDestination(in root: URL, username: String, virtualPath: String) -> URL? {
         let path = components(from: virtualPath)
-        guard let folder = components(from: username).first, !path.isEmpty else { return nil }
+        guard let uploader = components(from: username).first, path.last != nil else { return nil }
 
-        var parts = [folder]
-        parts.append(contentsOf: path.suffix(maximumComponents - 1))
-
+        let parts = [uploader] + path.suffix(2)
         var url = root
         for (index, part) in parts.enumerated() {
             url.appendPathComponent(part, isDirectory: index < parts.count - 1)
