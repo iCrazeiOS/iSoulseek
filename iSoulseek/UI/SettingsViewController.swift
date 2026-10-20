@@ -122,9 +122,9 @@ final class SettingsViewController: UIViewController {
         ]
 
         let search = [
-            Item(title: "Sort results", value: store.searchSortOrder.displayName,
+            Item(title: "Sort results", value: store.defaultSearchSortOrder.displayName,
                  accessory: .disclosureIndicator, action: { [weak self] in self?.chooseSortOrder() }),
-            Item(title: "Search filters", subtitle: store.searchOptions.summary,
+            Item(title: "Search filters", subtitle: store.defaultSearchOptions.summary,
                  accessory: .disclosureIndicator, style: .subtitle,
                  action: { [weak self] in self?.editSearchOptions() }),
         ]
@@ -214,9 +214,9 @@ final class SettingsViewController: UIViewController {
                                       message: "How search results are ordered.",
                                       preferredStyle: .actionSheet)
         for order in SearchSortOrder.allCases {
-            let title = order == client.store.searchSortOrder ? "✓ \(order.displayName)" : order.displayName
+            let title = order == client.store.defaultSearchSortOrder ? "✓ \(order.displayName)" : order.displayName
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
-                self?.client.store.searchSortOrder = order
+                self?.client.store.setDefaultSearchSortOrder(order)
                 self?.rebuild()
             })
         }
@@ -226,8 +226,8 @@ final class SettingsViewController: UIViewController {
     }
 
     private func editSearchOptions() {
-        let controller = SearchOptionsViewController(options: client.store.searchOptions) { [weak self] options in
-            self?.client.store.searchOptions = options
+        let controller = SearchOptionsViewController(options: client.store.defaultSearchOptions) { [weak self] options in
+            self?.client.store.setDefaultSearchOptions(options)
             self?.rebuild()
         }
         present(controller, animated: true)

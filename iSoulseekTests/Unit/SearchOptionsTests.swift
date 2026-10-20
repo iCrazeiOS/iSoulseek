@@ -127,13 +127,13 @@ final class SearchOptionsTests: XCTestCase {
         XCTAssertEqual(options.summary, "flac · lossless · free slots")
     }
 
-    func testSessionStoreRoundTrip() {
+    func testSavedDefaultsSurviveANewStore() {
         let suite = "SearchOptionsTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let store = SessionStore(defaults: defaults, keychainService: "test.\(suite)")
-        XCTAssertEqual(store.searchOptions, SearchOptions())
+        XCTAssertEqual(store.defaultSearchOptions, SearchOptions())
 
         var options = SearchOptions()
         options.fileTypes = ["flac", "mp3"]
@@ -143,9 +143,43 @@ final class SearchOptionsTests: XCTestCase {
         options.minimumBitrate = 320
         options.requiresLossless = true
         options.requiresFreeSlot = true
-        store.searchOptions = options
+        store.setDefaultSearchOptions(options)
 
-        XCTAssertEqual(store.searchOptions, options)
+        XCTAssertEqual(store.defaultSearchOptions, options)
+        XCTAssertEqual(store.searchOptions, options, "new defaults apply to the current session")
+
+        let reloaded = SessionStore(defaults: defaults, keychainService: "test.\(suite)")
+        XCTAssertEqual(reloaded.defaultSearchOptions, options)
+        XCTAssertEqual(reloaded.searchOptions, options)
+    }
+
+    func testSearchScreenChangesDoNotBecomeDefaults() {
+        let suite = "SearchOptionsTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = SessionStore(defaults: defaults, keychainService: "test.\(suite)")
+        var saved = SearchOptions()
+        saved.fileTypes = ["flac"]
+        store.setDefaultSearchOptions(saved)
+
+        var temporary = SearchOptions()
+        temporary.minimumBitrate = 320
+        store.searchOptions = temporary
+
+        XCTAssertEqual(store.searchOptions, temporary)
+        XCTAssertEqual(store.defaultSearchOptions, saved)
+
+        let reloaded = SessionStore(defaults: defaults, keychainService: "test.\(suite)")
+        XCTAssertEqual(reloaded.searchOptions, saved, "a temporary change must not survive a new session")
+        XCTAssertEqual(reloaded.defaultSearchOptions, saved)
+
+        store.clearSearchOverrides()
+        XCTAssertEqual(store.searchOptions, saved)
+
+        store.searchOptions = temporary
+        store.setDefaultSearchOptions(saved)
+        XCTAssertEqual(store.searchOptions, saved, "changing the defaults applies them right away")
     }
 
     func testDecodingOlderOptionsUsesDefaults() throws {

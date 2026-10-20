@@ -1,6 +1,7 @@
 import Foundation
 
-/// Persisted user preferences. The password itself lives in the Keychain.
+/// User preferences, persisted in `UserDefaults` apart from this session's temporary search
+/// overrides. The password itself lives in the Keychain.
 final class SessionStore {
 
     private enum Key {
@@ -23,6 +24,12 @@ final class SessionStore {
     private let defaults: UserDefaults
     private let keychainService: String
     private let documentsOverride: URL?
+
+    /// Filters and sort order in effect for this session. The Search screen edits these only; they
+    /// start at the saved defaults and are never written back, so tweaking a search leaves the
+    /// defaults set in Settings alone. Cleared when the account signs out.
+    private var sessionSearchOptions: SearchOptions?
+    private var sessionSearchSortOrder: SearchSortOrder?
 
     init(defaults: UserDefaults = .standard, keychainService: String = Keychain.defaultService,
          documentsDirectory: URL? = nil) {
@@ -64,7 +71,14 @@ final class SessionStore {
         set { defaults.set(Int(newValue.rawValue), forKey: Key.status) }
     }
 
+    /// Sort order for this session. Changing it from the Search screen does not save a default.
     var searchSortOrder: SearchSortOrder {
+        get { sessionSearchSortOrder ?? defaultSearchSortOrder }
+        set { sessionSearchSortOrder = newValue }
+    }
+
+    /// The saved sort order edited from Settings.
+    private(set) var defaultSearchSortOrder: SearchSortOrder {
         get {
             SearchSortOrder(rawValue: defaults.integer(forKey: Key.searchSortOrder)) ?? .arrival
         }
@@ -73,7 +87,14 @@ final class SessionStore {
         }
     }
 
+    /// Filters for this session. Changing them from the Search screen does not save a default.
     var searchOptions: SearchOptions {
+        get { sessionSearchOptions ?? defaultSearchOptions }
+        set { sessionSearchOptions = newValue }
+    }
+
+    /// The saved filters edited from Settings.
+    private(set) var defaultSearchOptions: SearchOptions {
         get {
             guard let data = defaults.data(forKey: Key.searchOptions),
                   let options = try? JSONDecoder().decode(SearchOptions.self, from: data) else {
@@ -85,6 +106,24 @@ final class SessionStore {
             guard let data = try? JSONEncoder().encode(newValue) else { return }
             defaults.set(data, forKey: Key.searchOptions)
         }
+    }
+
+    /// Saves new defaults and applies them right away, replacing any temporary changes.
+    func setDefaultSearchSortOrder(_ order: SearchSortOrder) {
+        defaultSearchSortOrder = order
+        sessionSearchSortOrder = order
+    }
+
+    /// Saves new defaults and applies them right away, replacing any temporary changes.
+    func setDefaultSearchOptions(_ options: SearchOptions) {
+        defaultSearchOptions = options
+        sessionSearchOptions = options
+    }
+
+    /// Drops temporary search changes so the saved defaults apply again.
+    func clearSearchOverrides() {
+        sessionSearchOptions = nil
+        sessionSearchSortOrder = nil
     }
 
     var downloadSortOrder: DownloadSortOrder {

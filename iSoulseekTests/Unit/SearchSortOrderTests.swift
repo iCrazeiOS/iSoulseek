@@ -48,7 +48,7 @@ final class SearchSortOrderTests: XCTestCase {
                                                               result(size: 1, speed: 100)))
     }
 
-    func testSessionStoreRoundTrip() {
+    func testSavedDefaultsSurviveANewStore() {
         let suite = "SearchSortOrderTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { UserDefaults().removePersistentDomain(forName: suite) }
@@ -56,9 +56,34 @@ final class SearchSortOrderTests: XCTestCase {
         let store = SessionStore(defaults: defaults, keychainService: "test.\(suite)")
         XCTAssertEqual(store.searchSortOrder, .arrival)
 
-        store.searchSortOrder = .largest
+        store.setDefaultSearchSortOrder(.largest)
         XCTAssertEqual(defaults.integer(forKey: "searchSortOrder"), SearchSortOrder.largest.rawValue)
         XCTAssertEqual(store.searchSortOrder, .largest)
+
+        let reloaded = SessionStore(defaults: defaults, keychainService: "test.\(suite)")
+        XCTAssertEqual(reloaded.defaultSearchSortOrder, .largest)
+        XCTAssertEqual(reloaded.searchSortOrder, .largest)
+    }
+
+    func testSearchScreenSortOrderDoesNotBecomeTheDefault() {
+        let suite = "SearchSortOrderTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+
+        let store = SessionStore(defaults: defaults, keychainService: "test.\(suite)")
+        store.setDefaultSearchSortOrder(.largest)
+        store.searchSortOrder = .smallest
+
+        XCTAssertEqual(store.searchSortOrder, .smallest)
+        XCTAssertEqual(store.defaultSearchSortOrder, .largest)
+
+        let reloaded = SessionStore(defaults: defaults, keychainService: "test.\(suite)")
+        XCTAssertEqual(reloaded.searchSortOrder, .largest, "a temporary order must not survive a new session")
+        XCTAssertEqual(reloaded.defaultSearchSortOrder, .largest)
+
+        store.searchSortOrder = .smallest
+        store.setDefaultSearchSortOrder(.largest)
+        XCTAssertEqual(store.searchSortOrder, .largest, "changing the defaults applies them right away")
     }
 
     func testStatusDefaultsToOnline() {

@@ -112,6 +112,7 @@ final class SoulseekClient {
     /// form instead of reconnecting the account the user just left.
     func signOut() {
         store.password = ""
+        store.clearSearchOverrides()
         disconnect()
     }
 
