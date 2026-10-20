@@ -275,13 +275,30 @@ final class DownloadsViewController: UIViewController {
         return folders + folder.files.map { .file($0, depth: depth) }
     }
 
-    private func toggle(_ folder: DownloadFolder) {
-        if expandedFolders.contains(folder.path) {
+    private func toggle(_ folder: DownloadFolder, at row: Int, depth: Int) {
+        let children = treeItems(in: folder, depth: depth + 1)
+        let rows = (row + 1..<row + 1 + children.count).map { IndexPath(row: $0, section: 0) }
+        let wasExpanded = expandedFolders.contains(folder.path)
+
+        if wasExpanded {
             expandedFolders.remove(folder.path)
+            displayed.removeSubrange(row + 1..<row + 1 + children.count)
         } else {
             expandedFolders.insert(folder.path)
+            displayed.insert(contentsOf: children, at: row + 1)
         }
-        rebuild()
+
+        if let cell = tableView.cellForRow(at: IndexPath(row: row, section: 0)) as? DownloadCell {
+            cell.configure(with: folder, depth: depth, isExpanded: !wasExpanded)
+        }
+
+        tableView.performBatchUpdates {
+            if wasExpanded {
+                tableView.deleteRows(at: rows, with: .top)
+            } else {
+                tableView.insertRows(at: rows, with: .top)
+            }
+        }
     }
 
     private func refreshTabTitles() {
@@ -414,8 +431,8 @@ extension DownloadsViewController: UITableViewDelegate {
         switch displayed[indexPath.row] {
         case .file(let file, _):
             presentPreview(for: file)
-        case .folder(let folder, _):
-            toggle(folder)
+        case .folder(let folder, let depth):
+            toggle(folder, at: indexPath.row, depth: depth)
         case .transfer:
             break
         }
