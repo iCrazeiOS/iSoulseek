@@ -102,7 +102,6 @@ final class LoginViewController: UIViewController {
         configure(usernameField, placeholder: "Username", contentType: .username, returnKey: .next)
         configure(passwordField, placeholder: "Password", contentType: .password, returnKey: .go)
         passwordField.isSecureTextEntry = true
-        usernameField.clearButtonMode = .whileEditing
         usernameField.accessibilityIdentifier = "login.username"
         passwordField.accessibilityIdentifier = "login.password"
         signInButton.accessibilityIdentifier = "login.submit"
