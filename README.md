@@ -12,31 +12,22 @@ dependencies.
 
 ## Using the app
 
-- **Sign in.** New usernames register automatically and there is no password reset. Credentials are
-  kept in the Keychain and used to sign in and reconnect automatically; the login form returns only
-  after a rejection, a session takeover, or sign out.
-- **Search.** Results are grouped by user and can be sorted by size, bitrate or duration. Tap or
-  swipe a result to download or browse that user; the navigation bar browses any username. The cog
-  opens filters for file types, excluded words, size, bitrate, lossless files and free upload slots;
-  Soulseek has no server-side filters, so they are applied locally and can be changed without
-  searching again.
-- **Browse.** Expand folders, filter by name, and download files or whole folders. Files list in
-  natural track order (`2` before `10`), with artwork and metadata files after the tracks.
-- **Transfers.** *Downloading* shows active downloads with progress, speed and cancel — failed
-  downloads stay listed with their reason (with a toast at failure time) for the rest of the
-  session, and queueing the same file again retires its failure row; *Downloaded*
-  supports sorting, list/tree views, Quick Look, swipe delete, Show in Files, and a long-press share
-  sheet — the list shows the uploader and album it came from, and the tree groups by those two
-  levels; *Uploading* shows files other users are taking from your share. *Select* chooses transfers
-  or downloaded files for bulk deletion/cancellation, with *Select All* for clearing everything in a
-  tab.
-- **Files.** Downloads go to `On My iPhone ▸ iSoulseek ▸ Downloads`, under the uploader's name and
-  the album folder (the remote path's final directory). The rest of the remote folder hierarchy is
-  not recreated, so files from two same-named albums of one uploader share a folder. Partials stay
-  hidden in `.partials` and resume when retried.
-- **Shares.** Anything in `On My iPhone ▸ iSoulseek ▸ Shared` is served to other users.
-- **Settings.** Server and ports, online/away status, share counts and rescan, search sort order and
-  filters, activity log, and sign out.
+- **Sign in.** New usernames register automatically; there is no password reset. Credentials live in
+  the Keychain, so the login form only reappears after a rejection, a session takeover, or sign out.
+- **Search.** Results group by user and sort by size, bitrate or duration. Tap or swipe a result to
+  download or browse. Filters (type, excluded words, size, bitrate, lossless, free slots) apply
+  locally, so changing them doesn't need a new search.
+- **Browse.** Expand folders, filter by name, and download files or whole folders. Natural track
+  order, with artwork and metadata files last.
+- **Transfers.** *Downloading* shows progress, speed and cancel, and keeps failures with their reason
+  for the session. *Downloaded* has sorting, list/tree views, Quick Look, swipe delete, Show in
+  Files and share. *Uploading* lists what others are taking from your share. *Select* does bulk
+  cancel/delete, with *Select All* per tab.
+- **Files.** Downloads land in `On My iPhone ▸ iSoulseek ▸ Downloads` under `<uploader>/<album>`.
+  Partials stay hidden in `.partials` and resume on retry.
+- **Shares.** Everything in `On My iPhone ▸ iSoulseek ▸ Shared` is served to other users.
+- **Settings.** Server and ports, status, share counts and rescan, search sort and filters, activity
+  log, sign out.
 
 ## Build and run
 
