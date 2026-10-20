@@ -572,7 +572,7 @@ private final class SearchResultCell: UITableViewCell {
     private func configureBadge(for result: SearchResult) {
         if result.isSlotFree {
             badge.isHidden = false
-            badge.text = "Free slot"
+            badge.text = "Ready"
             badge.textColor = .systemGreen
             badge.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.16)
         } else if result.queueLength > 0 {

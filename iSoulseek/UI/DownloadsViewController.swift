@@ -374,7 +374,7 @@ extension DownloadsViewController: UITableViewDelegate {
             return UISwipeActionsConfiguration(actions: [action])
 
         case .file(let file):
-            let action = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, completion in
+            let deleteAction = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, completion in
                 guard let self else { completion(false); return }
                 DownloadedFiles.delete(file.url, upTo: self.client.store.downloadsDirectory)
                 self.scanGeneration += 1
@@ -383,7 +383,43 @@ extension DownloadsViewController: UITableViewDelegate {
                 Theme.showToast("Deleted \(file.name)", in: self.view)
                 completion(true)
             }
-            return UISwipeActionsConfiguration(actions: [action])
+
+            let filesAction = UIContextualAction(style: .normal, title: "Files") { [weak self] _, _, completion in
+                guard let self else { completion(false); return }
+                self.showInFiles(file, completion: completion)
+            }
+            filesAction.image = UIImage(systemName: "folder")
+            filesAction.backgroundColor = .systemBlue
+            filesAction.accessibilityLabel = "Show in Files"
+
+            return UISwipeActionsConfiguration(actions: [deleteAction, filesAction])
+        }
+    }
+
+    /// Opens the containing folder in Files. There is no public API for this; `shareddocuments://`
+    /// is the de facto scheme, and folders open more reliably than files.
+    private func showInFiles(_ file: DownloadedFile, completion: @escaping (Bool) -> Void) {
+        guard FileManager.default.fileExists(atPath: file.url.path) else {
+            Theme.showToast("This file is no longer on the device", in: view)
+            completion(false)
+            return
+        }
+
+        let folder = file.url.deletingLastPathComponent()
+        let path = folder.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+            ?? folder.path
+        guard let url = URL(string: "shareddocuments://\(path)") else {
+            completion(false)
+            return
+        }
+
+        UIApplication.shared.open(url, options: [:]) { [weak self] opened in
+            if !opened, let self {
+                let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+                    ?? "iSoulseek"
+                Theme.showToast("Open Files › On My iPhone › \(appName) › Downloads", in: self.view)
+            }
+            completion(true)
         }
     }
 }
