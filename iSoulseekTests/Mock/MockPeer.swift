@@ -35,6 +35,10 @@ final class MockPeer {
     private var nextDownloadToken: UInt32 = 0x0FFF_0001
     /// When true, the mock refuses the direct route and makes the client dial it back instead.
     var downloadViaIndirect = false
+    /// When true, QueueUpload is recorded but never answered, leaving the download queued.
+    var ignoresQueueUpload = false
+    /// When set, each file connection sends at most this many bytes and stays open, so transfers stall.
+    var downloadStallAfter: Int?
     /// When set, QueueUpload requests are answered with UploadDenied carrying this reason.
     var denyQueueUploadReason: String?
 
@@ -312,6 +316,7 @@ final class MockPeer {
         case 43: // QueueUpload
             guard let filename = try? reader.string() else { return }
             recordedQueueUploads.append(filename)
+            if ignoresQueueUpload { return }
             if let reason = denyQueueUploadReason {
                 var denial = MockWriter()
                 denial.string(filename)
@@ -416,8 +421,11 @@ final class MockPeer {
 
                 let total = UInt64(self.downloadPayload.count)
                 let start = Int(min(offset, total))
-                let remaining = self.downloadPayload.subdata(in: start..<self.downloadPayload.count)
-                let closeWhenDone = !self.downloadReportsSize
+                var remaining = self.downloadPayload.subdata(in: start..<self.downloadPayload.count)
+                if let limit = self.downloadStallAfter, remaining.count > limit {
+                    remaining = remaining.prefix(limit)
+                }
+                let closeWhenDone = !self.downloadReportsSize && self.downloadStallAfter == nil
                 channel.sendRaw(remaining) { _ in
                     if closeWhenDone { channel.cancel() }
                 }
@@ -441,8 +449,11 @@ final class MockPeer {
 
             let total = UInt64(self.downloadPayload.count)
             let start = Int(min(offset, total))
-            let remaining = self.downloadPayload.subdata(in: start..<self.downloadPayload.count)
-            let closeWhenDone = !self.downloadReportsSize
+            var remaining = self.downloadPayload.subdata(in: start..<self.downloadPayload.count)
+            if let limit = self.downloadStallAfter, remaining.count > limit {
+                remaining = remaining.prefix(limit)
+            }
+            let closeWhenDone = !self.downloadReportsSize && self.downloadStallAfter == nil
             channel.sendRaw(remaining) { _ in
                 if closeWhenDone { channel.cancel() }
             }

@@ -362,6 +362,7 @@ enum PeerRequest {
     case transferRequest(TransferRequestInfo)
     case transferResponse(TransferResponseInfo)
     case uploadDenied(filename: String, reason: String)
+    case placeInQueueRequest(filename: String)
     case placeInQueueResponse(filename: String, place: UInt32)
 
     var usesInitChannel: Bool {
@@ -385,6 +386,7 @@ enum PeerRequest {
         case .transferRequest: return PeerCode.transferRequest.rawValue
         case .transferResponse: return PeerCode.transferResponse.rawValue
         case .placeInQueueResponse: return PeerCode.placeInQueueResponse.rawValue
+        case .placeInQueueRequest: return PeerCode.placeInQueueRequest.rawValue
         case .uploadDenied: return PeerCode.uploadDenied.rawValue
         }
     }
@@ -455,6 +457,8 @@ enum PeerRequest {
             } else {
                 writer.write(string: response.reason ?? TransferDenialReason.queued)
             }
+        case .placeInQueueRequest(let filename):
+            writer.write(string: filename)
         case .placeInQueueResponse(let filename, let place):
             writer.write(string: filename)
             writer.write(place)

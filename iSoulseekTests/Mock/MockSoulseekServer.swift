@@ -39,6 +39,8 @@ final class MockSoulseekServer {
 
     /// When set, the server reports this port for every user, so tests can break the direct route.
     var peerPortOverride: UInt16?
+    /// Users the server reports as offline (no address), like a real `GetPeerAddress` failure.
+    var offlinePeers: Set<String> = []
 
     // MARK: Lifecycle
 
@@ -199,8 +201,13 @@ final class MockSoulseekServer {
         guard let peer, peer.port > 0 || peerPortOverride != nil else { return }
         var writer = MockWriter()
         writer.string(user)
-        writer.ip("127.0.0.1")
-        writer.u32(UInt32(peerPortOverride ?? peer.port))
+        if offlinePeers.contains(user) {
+            writer.ip("0.0.0.0")
+            writer.u32(0)
+        } else {
+            writer.ip("127.0.0.1")
+            writer.u32(UInt32(peerPortOverride ?? peer.port))
+        }
         channel.send(code: 3, payload: writer.data)
     }
 

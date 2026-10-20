@@ -19,6 +19,23 @@ enum SoulseekError: LocalizedError {
     }
 }
 
+/// Why we could not establish a peer session, in terms the transfer UI can show.
+enum SessionFailure {
+    case offline
+    case timedOut
+    case closed
+    case busy
+
+    var message: String {
+        switch self {
+        case .offline: return "Peer is offline"
+        case .timedOut: return "Peer did not respond"
+        case .closed: return "Connection closed"
+        case .busy: return "Too many peers connected"
+        }
+    }
+}
+
 /// The single entry point to the Soulseek network.
 ///
 /// Everything protocol-related runs on one serial queue, so no state is shared across threads.
@@ -71,7 +88,7 @@ final class SoulseekClient {
     private var sessions: [String: PeerSession] = [:]
     /// The last time each session was activated or carried a message, for reaping idle sessions.
     private var sessionActivity: [String: Date] = [:]
-    private var sessionRequests: [String: [(PeerSession?) -> Void]] = [:]
+    private var sessionRequests: [String: [(PeerSession?, SessionFailure?) -> Void]] = [:]
     private var sessionTimeouts: [String: DispatchWorkItem] = [:]
     private var pendingPierce: [UInt32: (username: String, created: Date)] = [:]
     private var fileDialsInFlight: Set<String> = []
@@ -170,7 +187,7 @@ final class SoulseekClient {
             self.browseRequests[key, default: []].append(completion)
             guard self.browseRequests[key]?.count == 1 else { return }
 
-            self.provideSession(username: username) { [weak self] session in
+            self.provideSession(username: username) { [weak self] session, _ in
                 guard let self else { return }
                 guard let session else {
                     self.finishBrowse(key: key, with: .failure(SoulseekError.peerUnavailable(username)))
@@ -603,11 +620,12 @@ final class SoulseekClient {
 
     // MARK: Peer sessions
 
-    private func provideSession(username: String, completion: @escaping (PeerSession?) -> Void) {
+    private func provideSession(username: String,
+                                completion: @escaping (PeerSession?, SessionFailure?) -> Void) {
         let key = username.lowercased()
         if let session = sessions[key], session.isReady {
             AppLog.peers.debug("reusing ready session for \"\(username, privacy: .public)\"")
-            completion(session)
+            completion(session, nil)
             return
         }
         if sessionRequests[key] != nil {
@@ -621,7 +639,7 @@ final class SoulseekClient {
             let evicted = evictIdleSessionsLocked()
             guard evicted > 0 else {
                 AppLog.peers.error("refusing session for \"\(username, privacy: .public)\": \(Self.maximumPeerSessions, privacy: .public) sessions already open and none idle")
-                completion(nil)
+                completion(nil, .busy)
                 return
             }
             AppLog.peers.info("evicted \(evicted, privacy: .public) idle session(s) to make room for \"\(username, privacy: .public)\"")
@@ -630,7 +648,7 @@ final class SoulseekClient {
 
         let timeout = DispatchWorkItem { [weak self] in
             guard let self, self.sessions[key] == nil else { return }
-            self.failSessionRequests(key: key, reason: "timed out")
+            self.failSessionRequests(key: key, reason: "timed out", failure: .timedOut)
         }
         sessionTimeouts[key] = timeout
         queue.asyncAfter(deadline: .now() + Self.peerConnectTimeout, execute: timeout)
@@ -638,7 +656,8 @@ final class SoulseekClient {
         resolveAddress(username: username) { [weak self] ip, port in
             guard let self else { return }
             guard !ip.isEmpty, ip != "0.0.0.0", port > 0 else {
-                self.failSessionRequests(key: key, reason: "no usable address \(ip):\(port)")
+                self.failSessionRequests(key: key, reason: "no usable address \(ip):\(port)",
+                                         failure: .offline)
                 return
             }
             AppLog.peers.debug("dialling \"\(username, privacy: .public)\" at \(ip, privacy: .public):\(port, privacy: .public)")
@@ -681,7 +700,7 @@ final class SoulseekClient {
         sessionActivity[key] = Date()
         sessionTimeouts.removeValue(forKey: key)?.cancel()
         let waiters = sessionRequests.removeValue(forKey: key) ?? []
-        for waiter in waiters { waiter(session) }
+        for waiter in waiters { waiter(session, nil) }
     }
 
     private func sessionClosed(key: String, session: PeerSession) {
@@ -694,16 +713,16 @@ final class SoulseekClient {
             finishBrowse(key: key, with: .failure(SoulseekError.peerUnavailable(session.username)))
         }
         if sessions[key] == nil {
-            failSessionRequests(key: key, reason: "session closed")
+            failSessionRequests(key: key, reason: "session closed", failure: .closed)
         }
     }
 
-    private func failSessionRequests(key: String, reason: String) {
+    private func failSessionRequests(key: String, reason: String, failure: SessionFailure) {
         sessionTimeouts.removeValue(forKey: key)?.cancel()
         let waiters = sessionRequests.removeValue(forKey: key) ?? []
         guard !waiters.isEmpty else { return }
         AppLog.peers.error("peer session for \"\(key, privacy: .public)\" failed (\(reason, privacy: .public)); failing \(waiters.count, privacy: .public) pending request(s)")
-        for waiter in waiters { waiter(nil) }
+        for waiter in waiters { waiter(nil, failure) }
     }
 
     private func releaseSessionIfIdle(username: String) {
@@ -788,7 +807,7 @@ final class SoulseekClient {
             finishBrowse(key: key, with: .failure(SoulseekError.notConnected))
         }
         for waiters in sessionWaiters {
-            for waiter in waiters { waiter(nil) }
+            for waiter in waiters { waiter(nil, .closed) }
         }
         let addressWaiters = addressRequests.values
         addressRequests.removeAll()
@@ -902,7 +921,7 @@ final class SoulseekClient {
             self?.releaseSessionIfIdle(username: username)
         }
         transferManager.sessionProvider = { [weak self] username, completion in
-            guard let self else { completion(nil); return }
+            guard let self else { completion(nil, .closed); return }
             self.provideSession(username: username, completion: completion)
         }
         transferManager.addressProvider = { [weak self] username, completion in
