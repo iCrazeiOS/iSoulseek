@@ -143,6 +143,22 @@ final class DownloadedFilesTests: XCTestCase {
         XCTAssertEqual(store.downloadLayout, .tree)
     }
 
+    func testTransferTabPreferenceRoundTrips() {
+        let suite = "DownloadedFilesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+
+        let store = SessionStore(defaults: defaults, keychainService: "test.\(suite)")
+        XCTAssertEqual(store.transferTab, .downloading)
+
+        store.transferTab = .uploading
+        XCTAssertEqual(defaults.integer(forKey: "transferTab"), TransferTab.uploading.rawValue)
+        XCTAssertEqual(store.transferTab, .uploading)
+
+        store.transferTab = .downloaded
+        XCTAssertEqual(store.transferTab, .downloaded)
+    }
+
     func testDeleteRemovesFileAndEmptyParents() throws {
         let nested = try write("Artist/Album/song.mp3")
         let rootFile = try write("keep.flac")

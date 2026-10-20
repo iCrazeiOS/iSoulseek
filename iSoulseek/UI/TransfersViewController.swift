@@ -6,12 +6,6 @@ import UIKit
 /// "Uploading" (files other users are taking from the share).
 final class TransfersViewController: UIViewController {
 
-    private enum Tab: Int {
-        case downloading
-        case downloaded
-        case uploading
-    }
-
     private enum Item {
         case transfer(Transfer)
         case file(DownloadedFile, depth: Int)
@@ -40,8 +34,8 @@ final class TransfersViewController: UIViewController {
     private var selectedTransfers: Set<UInt32> = []
     private var selectedFiles: Set<URL> = []
 
-    private var currentTab: Tab {
-        Tab(rawValue: tabControl.selectedSegmentIndex) ?? .downloading
+    private var currentTab: TransferTab {
+        TransferTab(rawValue: tabControl.selectedSegmentIndex) ?? .downloading
     }
 
     private var activeTransfers: [Transfer] {
@@ -154,7 +148,7 @@ final class TransfersViewController: UIViewController {
     }
 
     private func configureLayout() {
-        tabControl.selectedSegmentIndex = Tab.downloading.rawValue
+        tabControl.selectedSegmentIndex = client.store.transferTab.rawValue
         tabControl.addTarget(self, action: #selector(tabChanged), for: .valueChanged)
         tabControl.translatesAutoresizingMaskIntoConstraints = false
 
@@ -233,7 +227,7 @@ final class TransfersViewController: UIViewController {
         // Selection operates on a stable snapshot; rows must not move or disappear mid-selection.
         guard !isSelecting else { return }
 
-        let targetTab: Tab = transfer.isUpload ? .uploading : .downloading
+        let targetTab: TransferTab = transfer.isUpload ? .uploading : .downloading
         let isVisible = targetTab == currentTab
         let existed = transfers.contains { $0.id == transfer.id }
 
@@ -272,11 +266,7 @@ final class TransfersViewController: UIViewController {
 
     private func reloadActiveTransfers() {
         transfers = client.transfers().filter { $0.state.isActive }
-        if currentTab == .downloaded {
-            refreshTabTitles()
-        } else {
-            rebuild()
-        }
+        rebuild()
     }
 
     private func scheduleDownloadedFilesReload() {
@@ -386,11 +376,11 @@ final class TransfersViewController: UIViewController {
 
     private func setTabTitles(downloading: Int, downloaded: Int, uploading: Int) {
         tabControl.setTitle(downloading > 0 ? "Downloading (\(downloading))" : "Downloading",
-                            forSegmentAt: Tab.downloading.rawValue)
+                            forSegmentAt: TransferTab.downloading.rawValue)
         tabControl.setTitle(downloaded > 0 ? "Downloaded (\(downloaded))" : "Downloaded",
-                            forSegmentAt: Tab.downloaded.rawValue)
+                            forSegmentAt: TransferTab.downloaded.rawValue)
         tabControl.setTitle(uploading > 0 ? "Uploading (\(uploading))" : "Uploading",
-                            forSegmentAt: Tab.uploading.rawValue)
+                            forSegmentAt: TransferTab.uploading.rawValue)
     }
 
     /// Files still being downloaded are not downloaded yet, even though a partial file exists on disk.
@@ -427,6 +417,7 @@ final class TransfersViewController: UIViewController {
     }
 
     @objc private func tabChanged() {
+        client.store.transferTab = currentTab
         updateNavigation()
         if currentTab == .downloaded {
             rebuild()
@@ -532,9 +523,33 @@ final class TransfersViewController: UIViewController {
         selectAllItem.isEnabled = hasSelectableItems && tableView.isUserInteractionEnabled
     }
 
+    @objc private func performSelectionAction() {
+        guard selectedCount > 0, !isDeleting else { return }
+
+        let count = selectedCount
+        let isUploading = currentTab == .uploading
+        let noun = isUploading
+            ? (count == 1 ? "upload" : "uploads")
+            : (count == 1 ? "item" : "items")
+
+        let alert = UIAlertController(
+            title: "\(isUploading ? "Cancel" : "Delete") \(count) \(noun)?",
+            message: "This action cannot be undone",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(
+            title: isUploading ? "Cancel Uploads" : "Delete",
+            style: isUploading ? .default : .destructive
+        ) { [weak self] _ in
+            self?.commitSelectionAction()
+        })
+        present(alert, animated: true)
+    }
+
     /// Deletes selected downloaded files, cancelling selected transfers first. Uploads are only
     /// cancelled, since they have no local copy.
-    @objc private func performSelectionAction() {
+    private func commitSelectionAction() {
         guard selectedCount > 0, !isDeleting else { return }
         isDeleting = true
 

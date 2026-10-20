@@ -12,6 +12,7 @@ final class SessionStore {
         static let searchSortOrder = "searchSortOrder"
         static let downloadSortOrder = "downloadSortOrder"
         static let downloadLayout = "downloadLayout"
+        static let transferTab = "transferTab"
     }
 
     static let defaultServerHost = "server.slsknet.org"
@@ -82,6 +83,11 @@ final class SessionStore {
     var downloadLayout: DownloadLayout {
         get { DownloadLayout(rawValue: defaults.integer(forKey: Key.downloadLayout)) ?? .list }
         set { defaults.set(newValue.rawValue, forKey: Key.downloadLayout) }
+    }
+
+    var transferTab: TransferTab {
+        get { TransferTab(rawValue: defaults.integer(forKey: Key.transferTab)) ?? .downloading }
+        set { defaults.set(newValue.rawValue, forKey: Key.transferTab) }
     }
 
     var isConfigured: Bool { !username.isEmpty && !password.isEmpty }

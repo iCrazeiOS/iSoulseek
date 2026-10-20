@@ -27,6 +27,13 @@ enum TransferState: Equatable {
     }
 }
 
+/// Which section of the Transfers screen is showing.
+enum TransferTab: Int {
+    case downloading
+    case downloaded
+    case uploading
+}
+
 /// A download we asked for, or an upload a peer asked us for.
 struct Transfer: Identifiable, Equatable {
     let id: UInt32
