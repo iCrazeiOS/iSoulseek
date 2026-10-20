@@ -133,6 +133,11 @@ final class SearchViewController: UIViewController {
                            forHeaderFooterViewReuseIdentifier: SearchSectionHeader.reuseIdentifier)
     }
 
+    private enum SearchBarPadding {
+        static let horizontal: CGFloat = 12
+        static let vertical: CGFloat = 10
+    }
+
     /// A plain label rather than a bar button item, so it does not take on the interactive
     /// "Liquid Glass" styling of the toolbar and cannot be mistaken for a control.
     private func configureLayout() {
@@ -145,8 +150,6 @@ final class SearchViewController: UIViewController {
         statusRow.addSubview(statusLabel)
         statusRow.isHidden = true
 
-        // The search bar is inset from the screen edges, the way the system search bar
-        // sits inside a navigation bar, rather than running the full width of the display.
         searchBar.translatesAutoresizingMaskIntoConstraints = false
 
         let stack = UIStackView(arrangedSubviews: [statusRow, tableView])
@@ -170,17 +173,17 @@ final class SearchViewController: UIViewController {
             statusLabel.trailingAnchor.constraint(equalTo: statusRow.trailingAnchor, constant: -16),
             statusLabel.bottomAnchor.constraint(equalTo: statusRow.bottomAnchor, constant: -8),
 
-            searchBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            searchBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            searchBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            searchBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: -SearchBarPadding.vertical),
+            searchBar.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: SearchBarPadding.horizontal),
+            searchBar.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -SearchBarPadding.horizontal),
 
-            stack.topAnchor.constraint(equalTo: searchBar.bottomAnchor),
+            // The bar also pads below its field, so add that back to keep the list where it was.
+            stack.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: SearchBarPadding.vertical),
             stack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             stack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-            messageView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor,
-                                             constant: Theme.emptyStateTopInset),
+            messageView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: Theme.emptyStateTopInset),
             messageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             messageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             messageView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
