@@ -229,6 +229,13 @@ final class SearchViewController: UIViewController {
 
     // MARK: Searching
 
+    /// Returns the screen to its starting state: no results, no running search and no status line.
+    private func clearSearch() {
+        if let token = activeToken { client.cancelSearch(token) }
+        hasSearched = false
+        resetResults()
+    }
+
     private func startSearch(_ query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -416,7 +423,7 @@ final class SearchViewController: UIViewController {
         updateCancelButton()
     }
 
-    /// The search bar's own cancel button doubles as "stop this search", so it stays visible while a
+    /// The search bar's cancel button also stops the running search, so it stays visible while a
     /// query is running even after the keyboard is dismissed.
     private func updateCancelButton() {
         let visible = searchBar.isFirstResponder || activeToken != nil
@@ -583,7 +590,8 @@ extension SearchViewController: UISearchBarDelegate {
     func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
         searchBar.text = ""
         searchBar.resignFirstResponder()
-        if let token = activeToken { client.cancelSearch(token) }
+        // The cancel button doubles as "stop and start over", so remove the query's results too.
+        clearSearch()
     }
 }
 
