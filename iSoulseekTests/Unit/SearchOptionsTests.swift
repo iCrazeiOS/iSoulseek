@@ -6,15 +6,17 @@ final class SearchOptionsTests: XCTestCase {
     private func result(name: String = "Music\\Album\\song.mp3", extension fileExtension: String = "mp3",
                         size: UInt64 = 5_000_000, bitrate: UInt32? = nil,
                         bitDepth: UInt32? = nil, sampleRate: UInt32? = nil,
-                        isSlotFree: Bool = true) -> SearchResult {
+                        isSlotFree: Bool = true, duration: UInt32? = nil,
+                        averageSpeed: UInt32 = 0) -> SearchResult {
         var attributes: [UInt32: UInt32] = [:]
         if let bitrate { attributes[SearchAttribute.bitrate.rawValue] = bitrate }
         if let bitDepth { attributes[SearchAttribute.bitDepth.rawValue] = bitDepth }
         if let sampleRate { attributes[SearchAttribute.sampleRate.rawValue] = sampleRate }
+        if let duration { attributes[SearchAttribute.duration.rawValue] = duration }
         return SearchResult(username: "user", token: 1,
                             file: ShareFile(name: name, size: size, fileExtension: fileExtension,
                                             attributes: attributes),
-                            isSlotFree: isSlotFree, averageSpeed: 0, queueLength: 0)
+                            isSlotFree: isSlotFree, averageSpeed: averageSpeed, queueLength: 0)
     }
 
     func testParsingWordsIsForgiving() {
@@ -88,7 +90,20 @@ final class SearchOptionsTests: XCTestCase {
         XCTAssertTrue(options.matches(result(name: "a\\b.wav", extension: "")))
         XCTAssertTrue(options.matches(result(bitDepth: 24, sampleRate: 96_000)))
         XCTAssertFalse(options.matches(result(bitDepth: 24)))
+        XCTAssertFalse(options.matches(result(bitDepth: 16, sampleRate: 44_100)))
         XCTAssertFalse(options.matches(result()))
+    }
+
+    func testLosslessDetectsAlacInsideTallM4aFiles() {
+        var options = SearchOptions()
+        options.requiresLossless = true
+
+        // 30 seconds near 1000 kbps: ALAC despite the plain m4a extension.
+        XCTAssertTrue(options.matches(result(name: "a\\b.m4a", extension: "m4a",
+                                             size: 4_000_000, duration: 30)))
+        // 320 kbps AAC in the same container stays hidden.
+        XCTAssertFalse(options.matches(result(name: "a\\b.m4a", extension: "m4a",
+                                              size: 1_200_000, duration: 30)))
     }
 
     func testLosslessIgnoresBitrateFloor() {

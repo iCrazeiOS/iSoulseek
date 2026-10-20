@@ -38,15 +38,34 @@ struct ShareFile: Hashable {
     /// Whether the file is lossless. Some peers report no bit depth or sample rate, so a known
     /// lossless extension is trusted as well.
     var isLossless: Bool {
-        if Self.losslessExtensions.contains(normalizedExtension) { return true }
+        guard !Self.losslessExtensions.contains(normalizedExtension) else { return true }
+
         let bitDepth = attributes[SearchAttribute.bitDepth.rawValue] ?? 0
         let sampleRate = attributes[SearchAttribute.sampleRate.rawValue] ?? 0
-        return bitDepth > 0 && sampleRate > 0
+
+        // Peers that probe a file report its bit depth alongside its sample rate. Anything
+        // above CD's 16 bits cannot come out of a lossy encode, so trust it outright. A plain
+        // 16-bit report proves nothing — lossy encodes carry those values too.
+        if bitDepth > 16 && sampleRate > 0 { return true }
+
+        // ALAC hides inside the plain `.m4a` container, where the extension cannot tell it
+        // apart from AAC and no attribute names the codec. The size/duration ratio separates
+        // them: ALAC runs near 1000 kbps on CD material while AAC tops out at 320.
+        if Self.ambiguousContainers.contains(normalizedExtension),
+           let duration = duration, duration > 0, size > 0 {
+            let kilobitsPerSecond = Double(size) * 8 / Double(duration) / 1000
+            return kilobitsPerSecond >= 700
+        }
+
+        return false
     }
 
     private static let losslessExtensions: Set<String> = [
         "flac", "wav", "aiff", "aif", "alac", "ape", "wv", "dsf", "dff", "tta", "shn",
     ]
+
+    /// Containers that can hold both lossless and lossy audio.
+    private static let ambiguousContainers: Set<String> = ["m4a", "mp4"]
 }
 
 /// A directory of a user's share.
@@ -90,6 +109,7 @@ enum SearchSortOrder: Int, CaseIterable {
     case smallest
     case bitrate
     case duration
+    case fastest
 
     var displayName: String {
         switch self {
@@ -98,6 +118,7 @@ enum SearchSortOrder: Int, CaseIterable {
         case .smallest: return "Smallest first"
         case .bitrate: return "Highest bitrate"
         case .duration: return "Longest"
+        case .fastest: return "Fastest first"
         }
     }
 
@@ -109,6 +130,7 @@ enum SearchSortOrder: Int, CaseIterable {
         case .smallest: return lhs.file.size < rhs.file.size
         case .bitrate: return (lhs.file.bitrate ?? 0) > (rhs.file.bitrate ?? 0)
         case .duration: return (lhs.file.duration ?? 0) > (rhs.file.duration ?? 0)
+        case .fastest: return lhs.averageSpeed > rhs.averageSpeed
         }
     }
 }

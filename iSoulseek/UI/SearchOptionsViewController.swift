@@ -7,6 +7,7 @@ final class SearchOptionsViewController: UIViewController, FloatingSheetContent 
     private enum Metrics {
         static let horizontal: CGFloat = 20
         static let fieldHeight: CGFloat = 44
+        static let sizeFieldHeight: CGFloat = 52
         static let rowHeight: CGFloat = 48
         static let cornerRadius: CGFloat = 12
         static let cardCornerRadius: CGFloat = 28
@@ -218,6 +219,9 @@ final class SearchOptionsViewController: UIViewController, FloatingSheetContent 
         sizeRow.distribution = .fillEqually
         sizeRow.spacing = 10
         contentStack.addArrangedSubview(sizeRow)
+        for field in [minimumSizeField, maximumSizeField] {
+            field.heightAnchor.constraint(equalToConstant: Metrics.sizeFieldHeight).isActive = true
+        }
         contentStack.setCustomSpacing(6, after: sizeRow)
         addHelper("Optional, in megabytes. Leave either field empty for no limit.", spacingAfter: 20)
 
@@ -225,7 +229,8 @@ final class SearchOptionsViewController: UIViewController, FloatingSheetContent 
         let losslessRow = makeLosslessRow()
         contentStack.addArrangedSubview(losslessRow)
         contentStack.setCustomSpacing(6, after: losslessRow)
-        addHelper("FLAC, WAV, ALAC and other lossless formats.", spacingAfter: 8)
+        addHelper("FLAC, WAV, ALAC and other lossless formats, including ALAC inside m4a.",
+                  spacingAfter: 8)
 
         let bitrateRow = makeBitrateRow()
         self.bitrateRow = bitrateRow
@@ -244,7 +249,7 @@ final class SearchOptionsViewController: UIViewController, FloatingSheetContent 
     private func makeHeader() -> UIView {
         let title = UILabel()
         title.text = "Search Options"
-        title.font = .preferredFont(forTextStyle: .title2)
+        title.font = .preferredFont(forTextStyle: .title2).withWeight(.semibold)
         title.adjustsFontForContentSizeCategory = true
         title.accessibilityTraits = .header
 
