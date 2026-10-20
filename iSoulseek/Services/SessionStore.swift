@@ -10,6 +10,7 @@ final class SessionStore {
         static let listeningPort = "listeningPort"
         static let status = "status"
         static let searchSortOrder = "searchSortOrder"
+        static let searchOptions = "searchOptions"
         static let downloadSortOrder = "downloadSortOrder"
         static let downloadLayout = "downloadLayout"
         static let transferTab = "transferTab"
@@ -69,6 +70,20 @@ final class SessionStore {
         }
         set {
             defaults.set(newValue.rawValue, forKey: Key.searchSortOrder)
+        }
+    }
+
+    var searchOptions: SearchOptions {
+        get {
+            guard let data = defaults.data(forKey: Key.searchOptions),
+                  let options = try? JSONDecoder().decode(SearchOptions.self, from: data) else {
+                return SearchOptions()
+            }
+            return options
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            defaults.set(data, forKey: Key.searchOptions)
         }
     }
 

@@ -35,6 +35,8 @@ final class SearchViewController: UIViewController {
     private var hasSearched = false
     private var activeToken: UInt32?
     private var sortOrder: SearchSortOrder = .arrival
+    private var searchOptions = SearchOptions()
+    private var hiddenCount = 0
     private var showsCancelButton = false
 
     // MARK: Views
@@ -63,6 +65,15 @@ final class SearchViewController: UIViewController {
 
     private lazy var sortItem = UIBarButtonItem(image: nil, style: .plain,
                                                 target: nil, action: nil)
+    private lazy var optionsItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(image: UIImage(systemName: "gearshape"),
+                                   style: .plain,
+                                   target: self,
+                                   action: #selector(presentSearchOptions))
+        item.accessibilityLabel = "Search options"
+        item.accessibilityHint = "Filter results by file type, size and quality."
+        return item
+    }()
     private lazy var browseItem: UIBarButtonItem = {
         let item = UIBarButtonItem(image: UIImage(systemName: "person.wave.2.fill"),
                                    style: .plain,
@@ -89,6 +100,7 @@ final class SearchViewController: UIViewController {
         title = "Search"
         view.backgroundColor = .systemBackground
         sortOrder = client.store.searchSortOrder
+        searchOptions = client.store.searchOptions
 
         configureSearchBar()
         configureTable()
@@ -96,6 +108,7 @@ final class SearchViewController: UIViewController {
         configureNavigation()
         observeClient()
         updateSortMenu()
+        updateOptionsItem()
         updateBackground()
         updateStatus()
     }
@@ -107,6 +120,13 @@ final class SearchViewController: UIViewController {
         if stored != sortOrder {
             sortOrder = stored
             updateSortMenu()
+            applySnapshot()
+        }
+
+        let storedOptions = client.store.searchOptions
+        if storedOptions != searchOptions {
+            searchOptions = storedOptions
+            updateOptionsItem()
             applySnapshot()
         }
     }
@@ -191,7 +211,7 @@ final class SearchViewController: UIViewController {
     }
 
     private func configureNavigation() {
-        navigationItem.leftBarButtonItem = sortItem
+        navigationItem.leftBarButtonItems = [sortItem, optionsItem]
         navigationItem.rightBarButtonItem = browseItem
     }
 
@@ -303,9 +323,14 @@ final class SearchViewController: UIViewController {
     private func applySnapshot() {
         // Order each user's results, then order the sections themselves.
         var visible: [String: [Item]] = [:]
+        var received = 0
         for key in order {
             guard let section = sectionsByKey[key] else { continue }
-            visible[key] = sorted(section.items)
+            received += section.items.count
+            let matching = section.items.filter { searchOptions.matches($0.result) }
+            if !matching.isEmpty {
+                visible[key] = sorted(matching)
+            }
         }
 
         var keys = order.filter { visible[$0] != nil }
@@ -325,6 +350,7 @@ final class SearchViewController: UIViewController {
         }
 
         visibleCount = keys.reduce(0) { $0 + (visible[$1]?.count ?? 0) }
+        hiddenCount = received - visibleCount
         dataSource.apply(snapshot, animatingDifferences: false)
         updateBackground()
         updateStatus()
@@ -347,9 +373,19 @@ final class SearchViewController: UIViewController {
         if activeToken != nil {
             messageView.configure(title: "Searching…", message: "Results appear as peers respond.", loading: true)
         } else if hasSearched {
-            messageView.configure(title: "No results",
-                                  message: "Try different words, or browse a specific user.",
-                                  symbol: "music.note.list")
+            if hiddenCount > 0 {
+                let noun = hiddenCount == 1 ? "result was" : "results were"
+                messageView.configure(
+                    title: "No matches",
+                    message: "\(hiddenCount.formatted()) \(noun) hidden by your search options.",
+                    actionTitle: "Change options",
+                    onAction: { [weak self] in self?.presentSearchOptions() },
+                    symbol: "line.3.horizontal.decrease.circle")
+            } else {
+                messageView.configure(title: "No results",
+                                      message: "Try different words, or browse a specific user.",
+                                      symbol: "music.note.list")
+            }
         } else {
             messageView.configure(title: "Find music",
                                   message: "Search the network by artist, album or file name.",
@@ -359,15 +395,18 @@ final class SearchViewController: UIViewController {
     }
 
     private func updateStatus() {
+        let hiddenSuffix = hiddenCount > 0 ? " · \(hiddenCount.formatted()) filtered" : ""
         let text: String?
         if activeToken != nil {
             text = isCapped
-                ? "Searching… \(visibleCount.formatted()) shown (capped)"
-                : "Searching… \(visibleCount.formatted()) shown"
+                ? "Searching… \(visibleCount.formatted()) shown (capped)\(hiddenSuffix)"
+                : "Searching… \(visibleCount.formatted()) shown\(hiddenSuffix)"
         } else if visibleCount > 0 {
             text = isCapped
-                ? "\(visibleCount.formatted()) shown (first \(Self.maximumResults.formatted()))"
-                : "\(visibleCount.formatted()) results"
+                ? "\(visibleCount.formatted()) shown (first \(Self.maximumResults.formatted()))\(hiddenSuffix)"
+                : "\(visibleCount.formatted()) results\(hiddenSuffix)"
+        } else if hiddenCount > 0 {
+            text = "0 results · \(hiddenCount.formatted()) filtered"
         } else {
             text = nil
         }
@@ -403,6 +442,23 @@ final class SearchViewController: UIViewController {
         client.store.searchSortOrder = order
         updateSortMenu()
         applySnapshot()
+    }
+
+    private func updateOptionsItem() {
+        optionsItem.image = UIImage(systemName: searchOptions.isActive ? "gearshape.fill" : "gearshape")
+        optionsItem.accessibilityValue = searchOptions.isActive ? "Filters on" : nil
+    }
+
+    @objc private func presentSearchOptions() {
+        searchBar.resignFirstResponder()
+        let controller = SearchOptionsViewController(options: searchOptions) { [weak self] options in
+            guard let self, options != self.searchOptions else { return }
+            self.searchOptions = options
+            self.client.store.searchOptions = options
+            self.updateOptionsItem()
+            self.applySnapshot()
+        }
+        present(controller, animated: true)
     }
 
     // MARK: Actions
@@ -476,7 +532,7 @@ extension SearchViewController: UITableViewDelegate {
               let model = sectionsByKey[key] else { return nil }
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: SearchSectionHeader.reuseIdentifier) as? SearchSectionHeader
-        header?.configure(username: model.displayName, count: model.items.count)
+        header?.configure(username: model.displayName, count: tableView.numberOfRows(inSection: section))
         return header
     }
 

@@ -26,6 +26,27 @@ struct ShareFile: Hashable {
     var displayName: String {
         ShareFolder.components(of: name).last ?? name
     }
+
+    /// The extension used to decide a file's type. Peers normally supply it, but some send an
+    /// empty string, so fall back to the extension in the file name.
+    var normalizedExtension: String {
+        let declared = fileExtension.trimmingCharacters(in: .whitespaces)
+        if !declared.isEmpty { return declared.lowercased() }
+        return (displayName as NSString).pathExtension.lowercased()
+    }
+
+    /// Whether the file is lossless. Some peers report no bit depth or sample rate, so a known
+    /// lossless extension is trusted as well.
+    var isLossless: Bool {
+        if Self.losslessExtensions.contains(normalizedExtension) { return true }
+        let bitDepth = attributes[SearchAttribute.bitDepth.rawValue] ?? 0
+        let sampleRate = attributes[SearchAttribute.sampleRate.rawValue] ?? 0
+        return bitDepth > 0 && sampleRate > 0
+    }
+
+    private static let losslessExtensions: Set<String> = [
+        "flac", "wav", "aiff", "aif", "alac", "ape", "wv", "dsf", "dff", "tta", "shn",
+    ]
 }
 
 /// A directory of a user's share.

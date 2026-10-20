@@ -16,7 +16,10 @@ dependencies.
   kept in the Keychain and used to sign in and reconnect automatically; the login form returns only
   after a rejection, a session takeover, or sign out.
 - **Search.** Results are grouped by user and can be sorted by size, bitrate or duration. Tap or
-  swipe a result to download or browse that user; the navigation bar browses any username.
+  swipe a result to download or browse that user; the navigation bar browses any username. The cog
+  opens filters for file types, excluded words, size, bitrate, lossless files and free upload slots;
+  Soulseek has no server-side filters, so they are applied locally and can be changed without
+  searching again.
 - **Browse.** Expand folders, filter by name, and download files or whole folders.
 - **Transfers.** *Downloading* shows active downloads with progress, speed and cancel; *Downloaded*
   supports sorting, list/tree views, Quick Look, swipe delete, Show in Files, and a long-press share
@@ -26,8 +29,8 @@ dependencies.
 - **Files.** Downloads go to `On My iPhone ▸ iSoulseek ▸ Downloads`, under the uploader's name.
   Partials stay hidden in `.partials` and resume when retried.
 - **Shares.** Anything in `On My iPhone ▸ iSoulseek ▸ Shared` is served to other users.
-- **Settings.** Server and ports, online/away status, share counts and rescan, search sort order,
-  activity log, and sign out.
+- **Settings.** Server and ports, online/away status, share counts and rescan, search sort order and
+  filters, activity log, and sign out.
 
 ## Build and run
 
@@ -49,7 +52,7 @@ xcodebuild -project iSoulseek.xcodeproj -scheme iSoulseek \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
-About 165 unit and integration tests, including an in-process mock Soulseek server and peer that
+About 180 unit and integration tests, including an in-process mock Soulseek server and peer that
 speak the real wire protocol. Live tests are skipped unless you set
 `SOULSEEK_LIVE=1 SOULSEEK_LIVE_USER=<user> SOULSEEK_LIVE_PASS=<pass>` (use `TEST_RUNNER_`-prefixed
 names for the UI test). Use a throwaway account — unused names are registered.
@@ -76,7 +79,8 @@ iSoulseek/
   Network/     FrameDecoder, SocketConnection, PeerListener
   Services/    SoulseekClient, TransferManager, PeerSession, ShareIndex,
                DownloadedFiles, SessionStore, Keychain
-  UI/          Root, Login, MainTabBar, Search, Browse, Transfers, Settings, Theme
+  UI/          Root, Login, MainTabBar, Search, SearchOptions, Browse, Transfers, Settings,
+               FloatingSheet, Theme
 iSoulseekTests/     Unit, Integration, Mock server/peer, Support, Live
 iSoulseekUITests/   opt-in live UI flow
 docs/PROTOCOL.md    wire-format reference
