@@ -434,7 +434,7 @@ final class TransfersViewController: UIViewController {
     /// Files still being downloaded are not downloaded yet, even though a partial file exists on disk.
     private func visibleDownloadedFiles(activeDownloads: [Transfer]) -> [DownloadedFile] {
         let activePaths = Set(activeDownloads.compactMap { transfer in
-            PathSanitizer.destination(in: client.store.downloadsDirectory,
+            PathSanitizer.downloadDestination(in: client.store.downloadsDirectory,
                                       username: transfer.username,
                                       virtualPath: transfer.filename)?.standardizedFileURL.path
         })
@@ -608,7 +608,7 @@ final class TransfersViewController: UIViewController {
             // A selected download may have finished while the user was selecting; remove its
             // completed file as well as cancelling the transfer.
             for transfer in selected where !transfer.isUpload {
-                guard let url = PathSanitizer.destination(in: root, username: transfer.username,
+                guard let url = PathSanitizer.downloadDestination(in: root, username: transfer.username,
                                                           virtualPath: transfer.filename) else { continue }
                 urls.insert(url.standardizedFileURL)
             }
@@ -885,7 +885,7 @@ private final class TransferCell: UITableViewCell {
         iconView.image = UIImage(systemName: symbol, withConfiguration: Self.iconConfiguration)
         iconView.tintColor = .secondaryLabel
         nameLabel.text = file.name
-        statusLabel.text = file.folder
+        statusLabel.text = file.location
         statusLabel.lineBreakMode = .byTruncatingMiddle
         statusLabel.isHidden = !showsFolder
         detailLabel.isHidden = false

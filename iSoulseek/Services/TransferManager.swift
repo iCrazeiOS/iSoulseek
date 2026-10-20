@@ -115,9 +115,9 @@ final class TransferManager {
 
     @discardableResult
     func enqueueDownload(username: String, filename: String, size: UInt64) -> DownloadStartResult? {
-        guard let url = PathSanitizer.destination(in: downloadsDirectory,
+        guard let url = PathSanitizer.downloadDestination(in: downloadsDirectory,
                                                   username: username, virtualPath: filename),
-              let partURL = PathSanitizer.destination(in: partialsDirectory,
+              let partURL = PathSanitizer.downloadDestination(in: partialsDirectory,
                                                       username: username, virtualPath: filename) else {
             AppLog.transfers.error("enqueue rejected unsanitizable path from \"\(username, privacy: .public)\": \"\(filename, privacy: .public)\" (size \(size, privacy: .public))")
             return nil

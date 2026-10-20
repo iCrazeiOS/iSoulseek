@@ -204,7 +204,8 @@ final class TransferIntegrationTests: XCTestCase {
             transfers.last(where: { !$0.isUpload })?.state == .completed
         }
 
-        let destination = env.downloadsDirectory.appendingPathComponent("MockPeer/Music/Album/deleteme.bin")
+        // The remote path was Music\Album\deleteme.bin: only the album folder is kept.
+        let destination = env.downloadsDirectory.appendingPathComponent("MockPeer/Album/deleteme.bin")
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
 
         DownloadedFiles.delete(destination, upTo: env.downloadsDirectory)
@@ -239,21 +240,22 @@ final class TransferIntegrationTests: XCTestCase {
             transfers.last(where: { $0.filename == secondFilename })?.state == .completed
         }
 
-        let first = env.downloadsDirectory.appendingPathComponent("MockPeer/Artist/Album/one.bin")
-        let second = env.downloadsDirectory.appendingPathComponent("MockPeer/Artist/Album/two.bin")
-        let album = env.downloadsDirectory.appendingPathComponent("MockPeer/Artist/Album")
-        let artist = env.downloadsDirectory.appendingPathComponent("MockPeer/Artist")
+        // Artist\Album\one.bin and two.bin share the album folder; the artist level is not kept.
+        let first = env.downloadsDirectory.appendingPathComponent("MockPeer/Album/one.bin")
+        let second = env.downloadsDirectory.appendingPathComponent("MockPeer/Album/two.bin")
+        let album = env.downloadsDirectory.appendingPathComponent("MockPeer/Album")
+        let uploader = env.downloadsDirectory.appendingPathComponent("MockPeer")
 
         DownloadedFiles.delete(first, upTo: env.downloadsDirectory)
         XCTAssertFalse(FileManager.default.fileExists(atPath: first.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: album.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: artist.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: uploader.path))
 
         DownloadedFiles.delete(second, upTo: env.downloadsDirectory)
         XCTAssertFalse(FileManager.default.fileExists(atPath: second.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: album.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: artist.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: uploader.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: env.downloadsDirectory.path),
                       "the downloads root must be kept")
     }

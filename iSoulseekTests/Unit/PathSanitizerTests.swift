@@ -47,13 +47,22 @@ final class PathSanitizerTests: XCTestCase {
         XCTAssertEqual(components.last, "c20")
     }
 
-    // MARK: destination(in:username:virtualPath:)
+    // MARK: downloadDestination(in:username:virtualPath:)
 
-    func testDestinationStaysInsideUsernameFolder() {
+    func testDestinationKeepsUploaderAndAlbumOnly() {
         let root = URL(fileURLWithPath: "/tmp/soulseek-root")
-        let destination = PathSanitizer.destination(in: root, username: "alice",
-                                                     virtualPath: "music/song.mp3")
-        XCTAssertEqual(destination?.path, "/tmp/soulseek-root/alice/music/song.mp3")
+        let destination = PathSanitizer.downloadDestination(
+            in: root, username: "alice",
+            virtualPath: "Music\\Artist\\Album (2020)\\01 - song.mp3")
+        XCTAssertEqual(destination?.path, "/tmp/soulseek-root/alice/Album (2020)/01 - song.mp3",
+                       "intermediate folders must not be recreated")
+    }
+
+    func testDestinationKeepsTopLevelFileInUploaderFolder() {
+        let root = URL(fileURLWithPath: "/tmp/soulseek-root")
+        let destination = PathSanitizer.downloadDestination(in: root, username: "alice",
+                                                             virtualPath: "song.mp3")
+        XCTAssertEqual(destination?.path, "/tmp/soulseek-root/alice/song.mp3")
     }
 
     func testDestinationNeverEscapesForTraversalAttempts() {
@@ -68,45 +77,45 @@ final class PathSanitizerTests: XCTestCase {
             "....//....//etc"
         ]
         for attempt in attempts {
-            guard let url = PathSanitizer.destination(in: root, username: "../alice",
-                                                       virtualPath: attempt) else { continue }
+            let url = PathSanitizer.downloadDestination(in: root, username: "../alice",
+                                                        virtualPath: attempt)
+            guard let url else { continue }
             XCTAssertTrue(url.standardizedFileURL.path.hasPrefix("/tmp/soulseek-root/"),
                           "\(attempt) escaped to \(url.path)")
+            XCTAssertEqual(url.pathComponents.prefix(3), ["/", "tmp", "soulseek-root"])
         }
     }
 
     func testDestinationSanitisesUsername() {
         let root = URL(fileURLWithPath: "/tmp/soulseek-root")
-        let destination = PathSanitizer.destination(in: root, username: "../alice",
-                                                     virtualPath: "song.mp3")
+        let destination = PathSanitizer.downloadDestination(in: root, username: "../alice",
+                                                             virtualPath: "song.mp3")
         XCTAssertEqual(destination?.path, "/tmp/soulseek-root/alice/song.mp3")
     }
 
     func testDestinationReturnsNilWhenNothingUsableRemains() {
         let root = URL(fileURLWithPath: "/tmp/soulseek-root")
-        XCTAssertNil(PathSanitizer.destination(in: root, username: "alice", virtualPath: ".."))
-        XCTAssertNil(PathSanitizer.destination(in: root, username: "alice", virtualPath: ""))
-        XCTAssertNil(PathSanitizer.destination(in: root, username: "alice", virtualPath: "///"))
-        XCTAssertNil(PathSanitizer.destination(in: root, username: "..", virtualPath: "song.mp3"))
+        XCTAssertNil(PathSanitizer.downloadDestination(in: root, username: "alice", virtualPath: ".."))
+        XCTAssertNil(PathSanitizer.downloadDestination(in: root, username: "alice", virtualPath: ""))
+        XCTAssertNil(PathSanitizer.downloadDestination(in: root, username: "alice", virtualPath: "///"))
+        XCTAssertNil(PathSanitizer.downloadDestination(in: root, username: "..", virtualPath: "song.mp3"))
     }
 
     func testDestinationSanitisesEachComponent() {
         let root = URL(fileURLWithPath: "/tmp/soulseek-root")
-        let destination = PathSanitizer.destination(in: root, username: "alice",
-                                                     virtualPath: "music/../../etc/pa:sswd")
-        XCTAssertEqual(destination?.path, "/tmp/soulseek-root/alice/music/etc/passwd")
+        let destination = PathSanitizer.downloadDestination(in: root, username: "alice",
+                                                             virtualPath: "music/../../etc/pa:sswd")
+        XCTAssertEqual(destination?.path, "/tmp/soulseek-root/alice/etc/passwd")
     }
 
-    func testDestinationSurvivesVeryLongPaths() {
+    func testDestinationStaysShallowForVeryLongPaths() {
         let root = URL(fileURLWithPath: "/tmp/soulseek-root")
         let path = (1...40).map { "component\($0)" }.joined(separator: "\\")
-        guard let url = PathSanitizer.destination(in: root, username: "alice",
-                                                   virtualPath: path) else {
-            return XCTFail("expected a destination")
-        }
-        let components = url.pathComponents.dropFirst(3) // / tmp soulseek-root
-        XCTAssertLessThanOrEqual(components.count, PathSanitizer.maximumComponents)
-        XCTAssertEqual(components.first, "alice")
+        let url = PathSanitizer.downloadDestination(in: root, username: "alice",
+                                                     virtualPath: path)
+        guard let url else { return XCTFail("expected a destination") }
+        XCTAssertEqual(url.pathComponents.suffix(3), ["alice", "component39", "component40"],
+                       "only the album and filename survive, whatever the remote depth")
         XCTAssertTrue(url.path.hasPrefix("/tmp/soulseek-root/"))
     }
 }

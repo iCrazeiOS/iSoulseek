@@ -25,11 +25,14 @@ dependencies.
   downloads stay listed with their reason (with a toast at failure time) for the rest of the
   session, and queueing the same file again retires its failure row; *Downloaded*
   supports sorting, list/tree views, Quick Look, swipe delete, Show in Files, and a long-press share
-  sheet; *Uploading* shows files other users are taking from your share. *Select* chooses transfers
+  sheet — the list shows the uploader and album it came from, and the tree groups by those two
+  levels; *Uploading* shows files other users are taking from your share. *Select* chooses transfers
   or downloaded files for bulk deletion/cancellation, with *Select All* for clearing everything in a
   tab.
-- **Files.** Downloads go to `On My iPhone ▸ iSoulseek ▸ Downloads`, under the uploader's name.
-  Partials stay hidden in `.partials` and resume when retried.
+- **Files.** Downloads go to `On My iPhone ▸ iSoulseek ▸ Downloads`, under the uploader's name and
+  the album folder (the remote path's final directory). The rest of the remote folder hierarchy is
+  not recreated, so files from two same-named albums of one uploader share a folder. Partials stay
+  hidden in `.partials` and resume when retried.
 - **Shares.** Anything in `On My iPhone ▸ iSoulseek ▸ Shared` is served to other users.
 - **Settings.** Server and ports, online/away status, share counts and rescan, search sort order and
   filters, activity log, and sign out.
