@@ -14,12 +14,18 @@ final class TransferManager {
     var maximumConcurrentUploads = 1
     var negotiateTimeout: TimeInterval = 1800
     var uploadStartTimeout: TimeInterval = 60
+    /// How long a transferring download may go without receiving bytes before it is retried.
+    var stallTimeout: TimeInterval = 120
+    /// Pause before a failed negotiation is attempted once more.
+    var retryDelay: TimeInterval = 5
+    /// How often to ask the uploader for our place in its queue.
+    var queuePollInterval: TimeInterval = 30
     var uploadChunkSize = 64 * 1024
 
     // MARK: Wiring
 
     /// Asks the client for an established peer connection to a user.
-    var sessionProvider: ((String, @escaping (PeerSession?) -> Void) -> Void)?
+    var sessionProvider: ((String, @escaping (PeerSession?, SessionFailure?) -> Void) -> Void)?
     /// Asks the client for a user's address, for outbound file connections.
     /// Calls back with an empty address when the user is offline.
     var addressProvider: ((String, @escaping (String, UInt16) -> Void) -> Void)?
@@ -50,6 +56,13 @@ final class TransferManager {
         /// Set while the partial is being promoted to its final location. Further data is ignored.
         var isFinishing = false
         var timeout: DispatchWorkItem?
+        /// The peer session that holds this request, used to poll our place in their queue.
+        var session: PeerSession?
+        var queueTimer: DispatchWorkItem?
+        /// Only one automatic retry is attempted per download.
+        var hasRetried = false
+        /// True while the previous attempt is being torn down, so its late close is ignored.
+        var isRetrying = false
     }
 
     private struct PendingUpload {
@@ -152,7 +165,7 @@ final class TransferManager {
         var transfer = Transfer(id: id, username: username, filename: filename,
                                 size: size > 0 ? size : offset, isUpload: false)
         transfer.transferred = offset
-        transfer.state = size > 0 && offset == size ? .completed : .negotiating
+        transfer.state = size > 0 && offset == size ? .completed : .connecting
         transfers.append(transfer)
         AppLog.transfers.info("download #\(id, privacy: .public) queued from \"\(username, privacy: .public)\": \"\(filename, privacy: .public)\" (size \(size, privacy: .public), resume offset \(offset, privacy: .public))")
         onUpdate?(transfer)
@@ -168,24 +181,31 @@ final class TransferManager {
 
         downloads[id] = download
         downloadsByKey[key] = id
-
-        sessionProvider?(username) { [weak self] session in
-            guard let self, var current = self.downloads[id] else { return }
-            guard let session else {
-                AppLog.transfers.error("download #\(id, privacy: .public) failed: no peer session for \"\(username, privacy: .public)\"")
-                self.failDownload(username: username, filename: filename,
-                                  reason: "Could not connect to \(username)")
-                return
-            }
-            if current.isStarted { return }
-            current.isStarted = true
-            self.downloads[id] = current
-            AppLog.transfers.debug("download #\(id, privacy: .public) sent QueueUpload to \"\(username, privacy: .public)\"")
-            session.send(.queueUpload(filename: filename))
-            self.scheduleNegotiationTimeout(id)
-        }
+        beginNegotiation(id: id)
 
         return .added(transfer)
+    }
+
+    /// Asks the client for a peer session and queues the file with the uploader.
+    private func beginNegotiation(id: UInt32) {
+        guard let download = downloads[id] else { return }
+        sessionProvider?(download.username) { [weak self] session, failure in
+            guard let self, var current = self.downloads[id], !current.isStarted else { return }
+            guard let session else {
+                AppLog.transfers.error("download #\(id, privacy: .public) failed: no peer session for \"\(current.username, privacy: .public)\"")
+                self.failDownload(username: current.username, filename: current.filename,
+                                  reason: failure?.message ?? "Could not connect to \(current.username)")
+                return
+            }
+            current.isStarted = true
+            current.session = session
+            self.downloads[id] = current
+            AppLog.transfers.debug("download #\(id, privacy: .public) sent QueueUpload to \"\(current.username, privacy: .public)\"")
+            session.send(.queueUpload(filename: current.filename))
+            self.updateTransfer(id) { $0.state = .queued(place: 0) }
+            self.startQueuePolling(id: id)
+            self.scheduleNegotiationTimeout(id)
+        }
     }
 
     func cancel(id: UInt32) {
@@ -196,6 +216,7 @@ final class TransferManager {
         }
         if let download = downloads.removeValue(forKey: id) {
             download.timeout?.cancel()
+            download.queueTimer?.cancel()
             downloadsByKey.removeValue(forKey: download.key)
             downloadConnections.removeValue(forKey: id)?.cancel()
             let handle = openHandles.removeValue(forKey: id)
@@ -227,6 +248,7 @@ final class TransferManager {
     func reset() {
         for (_, download) in downloads {
             download.timeout?.cancel()
+            download.queueTimer?.cancel()
         }
         for (_, upload) in uploads {
             upload.timeout?.cancel()
@@ -262,6 +284,8 @@ final class TransferManager {
             handleTransferResponse(info, from: session)
         case .placeInQueueRequest(let filename):
             handlePlaceInQueueRequest(filename: filename, from: session)
+        case .placeInQueueResponse(let filename, let place):
+            handlePlaceInQueueResponse(filename: filename, place: place, from: session)
         case .uploadDenied(let filename, let reason):
             AppLog.transfers.info("peer \"\(session.username, privacy: .public)\" denied upload of \"\(filename, privacy: .public)\": \(reason, privacy: .public)")
             failDownload(username: session.username, filename: filename, reason: reason)
@@ -289,6 +313,9 @@ final class TransferManager {
 
         peerTokenToDownload[info.token] = id
         download.awaitingFileConnection = true
+        download.session = session
+        download.queueTimer?.cancel()
+        download.queueTimer = nil
         if let size = info.size, size > 0 {
             download.expectedSize = size
             if download.offset > size {
@@ -298,10 +325,16 @@ final class TransferManager {
                 updateTransfer(id) {
                     $0.transferred = 0
                     $0.size = size
+                    $0.state = .negotiating
                 }
             } else {
-                updateTransfer(id) { $0.size = size }
+                updateTransfer(id) {
+                    $0.size = size
+                    $0.state = .negotiating
+                }
             }
+        } else {
+            updateTransfer(id) { $0.state = .negotiating }
         }
         downloads[id] = download
         session.send(.transferResponse(TransferResponseInfo(token: info.token, isAllowed: true,
@@ -334,6 +367,7 @@ final class TransferManager {
                 connection.cancel()
                 return
             }
+            self.downloads[id]?.isRetrying = false
             guard self.downloadConnections[id] == nil else {
                 // Both the direct and the indirect connection were established; use the first one.
                 connection.cancel()
@@ -372,11 +406,12 @@ final class TransferManager {
                     connection.onBytes?(remainder)
                 }
 
-                var current = download
+                var current = self.downloads[id] ?? download
                 current.transferred = download.offset
                 current.awaitingFileConnection = false
                 self.downloads[id] = current
                 self.updateTransfer(id) { $0.state = .transferring }
+                self.scheduleStallTimeout(id: id)
             }
         }
     }
@@ -478,6 +513,27 @@ final class TransferManager {
         let key = Self.key(username: session.username, filename: filename)
         guard let id = uploadsByKey[key] else { return }
         sendPlaceInQueue(id, session: session)
+    }
+
+    private func handlePlaceInQueueResponse(filename: String, place: UInt32, from session: PeerSession) {
+        let key = Self.key(username: session.username, filename: filename)
+        guard let id = downloadsByKey[key] else { return }
+        updateTransfer(id) { transfer in
+            if case .queued = transfer.state { transfer.state = .queued(place: place) }
+        }
+    }
+
+    /// Polls the uploader for our place in its queue while the request waits for a slot.
+    private func startQueuePolling(id: UInt32) {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, let download = self.downloads[id],
+                  let transfer = self.transfers.first(where: { $0.id == id }),
+                  case .queued = transfer.state else { return }
+            download.session?.send(.placeInQueueRequest(filename: download.filename))
+            self.startQueuePolling(id: id)
+        }
+        downloads[id]?.queueTimer = work
+        queue.asyncAfter(deadline: .now() + queuePollInterval, execute: work)
     }
 
     private func sendPlaceInQueue(_ id: UInt32, session: PeerSession) {
@@ -653,7 +709,7 @@ final class TransferManager {
     // MARK: Download plumbing
 
     private func write(_ chunk: Data, to id: UInt32, connection: SocketConnection) {
-        guard var download = downloads[id], !download.isFinishing,
+        guard var download = downloads[id], !download.isFinishing, !download.isRetrying,
               let handle = openHandles[id] else {
             connection.cancel()
             return
@@ -722,7 +778,7 @@ final class TransferManager {
     /// Marks a download finished and releases everything it held. Called for a known-size transfer
     /// once the last chunk arrives, and from `onClosed` for peers that never state a size.
     private func completeDownload(id: UInt32) {
-        guard let download = downloads[id], !download.isFinishing else { return }
+        guard let download = downloads[id], !download.isFinishing, !download.isRetrying else { return }
         let reachedEnd = download.expectedSize > 0
             ? download.transferred >= download.expectedSize
             : download.transferred > 0
@@ -761,6 +817,7 @@ final class TransferManager {
         AppLog.transfers.info("download #\(id, privacy: .public) completed: \"\(download.filename, privacy: .public)\"")
         downloads.removeValue(forKey: id)
         download.timeout?.cancel()
+        download.queueTimer?.cancel()
         downloadsByKey.removeValue(forKey: download.key)
         downloadConnections.removeValue(forKey: id)?.cancel()
         // Progress reports are throttled, so the last visible state may lag behind; publish the
@@ -785,6 +842,7 @@ final class TransferManager {
         progressMarks[id] = now
         let transferred = downloads[id]?.transferred ?? 0
         updateTransfer(id) { $0.transferred = transferred }
+        scheduleStallTimeout(id: id)
     }
 
     private func prepareDownloadFile(id: UInt32, download: Download, completion: @escaping (FileHandle?) -> Void) {
@@ -809,7 +867,9 @@ final class TransferManager {
     private func failDownload(username: String, filename: String, reason: String) {
         let key = Self.key(username: username, filename: filename)
         guard let id = downloadsByKey[key] else { return }
-        let lastBytes = downloads[id]?.transferred
+        let download = downloads[id]
+        let lastBytes = download?.transferred
+        download?.queueTimer?.cancel()
         AppLog.transfers.error("download #\(id, privacy: .public) from \"\(username, privacy: .public)\": \"\(filename, privacy: .public)\" FAILED — \(reason, privacy: .public)")
         downloads.removeValue(forKey: id)
         downloadsByKey.removeValue(forKey: key)
@@ -832,14 +892,57 @@ final class TransferManager {
 
     private func scheduleNegotiationTimeout(_ id: UInt32) {
         let work = DispatchWorkItem { [weak self] in
-            guard let self, let download = self.downloads[id] else { return }
+            guard let self, self.downloads[id] != nil else { return }
             guard let transfer = self.transfers.first(where: { $0.id == id }), transfer.state.isActive,
                   transfer.state != .transferring else { return }
-            self.failDownload(username: download.username, filename: download.filename,
-                              reason: "No response from peer")
+            self.retryDownload(id: id, reason: "No response from peer")
         }
         downloads[id]?.timeout = work
         queue.asyncAfter(deadline: .now() + negotiateTimeout, execute: work)
+    }
+
+    /// Restarts the transfer clock; any chunk pushes the stall deadline out again.
+    private func scheduleStallTimeout(id: UInt32) {
+        downloads[id]?.timeout?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.downloads[id] != nil,
+                  self.transfers.first(where: { $0.id == id })?.state == .transferring else { return }
+            self.retryDownload(id: id, reason: "Download stalled")
+        }
+        downloads[id]?.timeout = work
+        queue.asyncAfter(deadline: .now() + stallTimeout, execute: work)
+    }
+
+    /// Gives a failed attempt one more chance, resuming from the bytes already on disk.
+    private func retryDownload(id: UInt32, reason: String) {
+        guard var download = downloads[id] else { return }
+        guard !download.hasRetried else {
+            failDownload(username: download.username, filename: download.filename, reason: reason)
+            return
+        }
+        download.hasRetried = true
+        download.isRetrying = true
+        download.isStarted = false
+        download.awaitingFileConnection = false
+        download.offset = download.transferred
+        download.timeout?.cancel()
+        download.timeout = nil
+        download.queueTimer?.cancel()
+        download.queueTimer = nil
+        download.session = nil
+        downloads[id] = download
+
+        downloadConnections.removeValue(forKey: id)?.cancel()
+        peerTokenToDownload = peerTokenToDownload.filter { $0.value != id }
+        if let handle = openHandles.removeValue(forKey: id) {
+            ioQueue.async { try? handle.close() }
+        }
+
+        AppLog.transfers.info("download #\(id, privacy: .public) will retry: \(reason, privacy: .public)")
+        updateTransfer(id) { $0.state = .connecting }
+        queue.asyncAfter(deadline: .now() + retryDelay) { [weak self] in
+            self?.beginNegotiation(id: id)
+        }
     }
 
     private func failUpload(_ id: UInt32, reason: String) {

@@ -1,6 +1,7 @@
 import Foundation
 
 enum TransferState: Equatable {
+    case connecting
     case queued(place: UInt32)
     case negotiating
     case transferring
@@ -10,15 +11,16 @@ enum TransferState: Equatable {
 
     var isActive: Bool {
         switch self {
-        case .queued, .negotiating, .transferring: return true
+        case .connecting, .queued, .negotiating, .transferring: return true
         case .completed, .failed, .cancelled: return false
         }
     }
 
     var description: String {
         switch self {
+        case .connecting: return "Connecting…"
         case .queued(let place): return place > 0 ? "Queued (#\(place))" : "Queued by peer"
-        case .negotiating: return "Waiting for peer slot"
+        case .negotiating: return "Starting…"
         case .transferring: return "Downloading"
         case .completed: return "Completed"
         case .failed(let reason): return "Failed: \(reason)"
@@ -56,7 +58,8 @@ struct Transfer: Identifiable, Equatable {
 
     /// The state in the direction of the transfer, for display in the Transfers screen.
     var stateDescription: String {
-        state == .transferring && isUpload ? "Uploading" : state.description
+        if case .queued(0) = state, !isUpload { return "Waiting for peer slot" }
+        return state == .transferring && isUpload ? "Uploading" : state.description
     }
 
     /// Whether this is a download that ended in failure, as opposed to a failed upload.

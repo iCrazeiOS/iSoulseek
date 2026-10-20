@@ -64,7 +64,7 @@ final class TransferManagerTests: XCTestCase {
         }
 
         XCTAssertEqual(transfer.transferred, 0)
-        XCTAssertEqual(transfer.state, .negotiating)
+        XCTAssertEqual(transfer.state, .connecting)
     }
 
     func testPartialExistingFileResumes() throws {
@@ -76,7 +76,7 @@ final class TransferManagerTests: XCTestCase {
         }
 
         XCTAssertEqual(transfer.transferred, 40)
-        XCTAssertEqual(transfer.state, .negotiating)
+        XCTAssertEqual(transfer.state, .connecting)
     }
 
     func testCancelDiscardsPartialFile() throws {
@@ -101,7 +101,7 @@ final class TransferManagerTests: XCTestCase {
     func testFailedDownloadIsPublishedThenDropped() {
         var published: [Transfer] = []
         manager.onUpdate = { published.append($0) }
-        manager.sessionProvider = { _, completion in completion(nil) }
+        manager.sessionProvider = { _, completion in completion(nil, nil) }
 
         guard case .added = manager.enqueueDownload(username: "alice",
                                                     filename: "Music\\song.flac", size: 100) else {
@@ -119,7 +119,7 @@ final class TransferManagerTests: XCTestCase {
     func testFailedDownloadReleasesTheUserSession() {
         var releasedUsernames: [String] = []
         manager.onUserWorkFinished = { releasedUsernames.append($0) }
-        manager.sessionProvider = { _, completion in completion(nil) }
+        manager.sessionProvider = { _, completion in completion(nil, nil) }
 
         _ = manager.enqueueDownload(username: "alice", filename: "Music\\song.flac", size: 100)
 
