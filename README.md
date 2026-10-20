@@ -1,138 +1,93 @@
 # iSoulseek
 
 A native iOS client for the [Soulseek](https://www.slsknet.org/) peer-to-peer network: sign in,
-search the network, browse other users' shares, and download to the app's Documents folder. It also
-publishes a share folder of its own so it behaves like a real client rather than a leech.
-
-Written in Swift with UIKit. No third-party dependencies.
+search, browse shares, download, and serve a share folder of your own. Swift/UIKit, no third-party
+dependencies.
 
 ## Requirements
 
-- Xcode 27 or newer (the project targets the iOS 27 SDK)
+- Xcode 27 or newer (iOS 27 SDK)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
-- **iOS 15.0 or newer.** Xcode 27 rejects a deployment target below 15.0
-  (`the range of supported deployment target versions is 15.0 to 27.0.x`), so 15.0 is the floor.
+- iOS 15.0 or newer
 
-### Note on the iOS 27 SDK running on a Mac
+## Using the app
 
-Built with the iOS 27 SDK, an iOS app run on Apple Silicon ("Designed for iPad") crashes as soon as
-a search controller in the navigation bar is activated. Its presentation machinery asks
-`UINavigationBar` for a default height, which reaches `UIScreen`'s scene bounds — a focus path the
-SDK no longer allows — and throws *"Accessing the focus system through UIScreen is no longer
-supported."* The search screen therefore uses a plain `UISearchBar` in the content view instead of a
-`UISearchController`; see the comment in `SearchViewController`.
+- **Sign in.** New usernames register automatically and there is no password reset. Credentials are
+  kept in the Keychain and used to sign in and reconnect automatically; the login form returns only
+  after a rejection, a session takeover, or sign out.
+- **Search.** Results are grouped by user and can be sorted by size, bitrate or duration. Tap or
+  swipe a result to download or browse that user; the navigation bar browses any username.
+- **Browse.** Expand folders, filter by name, and download files or whole folders.
+- **Downloads.** *Downloading* shows active downloads and uploads with progress, speed and cancel;
+  *Completed* supports sorting, list/tree views, Quick Look, swipe delete, Show in Files, and a
+  long-press share sheet. *Delete all* removes files and active transfers.
+- **Files.** Downloads go to `On My iPhone ▸ iSoulseek ▸ Downloads`, under the uploader's name.
+  Partials stay hidden in `.partials` and resume when retried.
+- **Shares.** Anything in `On My iPhone ▸ iSoulseek ▸ Shared` is served to other users.
+- **Settings.** Server and ports, online/away status, share counts and rescan, search sort order,
+  activity log, and sign out.
 
 ## Build and run
 
 ```sh
-xcodegen generate                       # writes iSoulseek.xcodeproj from project.yml
-open iSoulseek.xcodeproj                 # then run on a simulator or device
-```
+xcodegen generate
+open iSoulseek.xcodeproj
 
-Command line:
-
-```sh
 xcodebuild -project iSoulseek.xcodeproj -scheme iSoulseek \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
 ```
 
-Tests:
+`./build_ipa.sh` produces an unsigned `iSoulseek.ipa` in the repository root. `iSoulseek.xcodeproj`
+is generated; `project.yml` is the source of truth.
+
+## Tests
 
 ```sh
 xcodebuild -project iSoulseek.xcodeproj -scheme iSoulseek \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
-This runs the unit and integration suite (140+ tests), including an in-process mock Soulseek server
-and peer that speak the real wire protocol. The live tests are skipped unless you opt in:
-
-```sh
-# Unit test bundle
-SOULSEEK_LIVE=1 SOULSEEK_LIVE_USER=<user> SOULSEEK_LIVE_PASS=<pass> \
-  xcodebuild -project iSoulseek.xcodeproj -scheme iSoulseek \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:iSoulseekTests test
-
-# UI flow test (xcodebuild only forwards TEST_RUNNER_-prefixed variables to a UI test runner)
-TEST_RUNNER_SOULSEEK_LIVE=1 \
-TEST_RUNNER_SOULSEEK_LIVE_USER=<user> TEST_RUNNER_SOULSEEK_LIVE_PASS=<pass> \
-  xcodebuild -project iSoulseek.xcodeproj -scheme iSoulseek \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:iSoulseekUITests test
-```
-
-The live tests sign in to `server.slsknet.org`, run one search, and (in the UI test) drive the whole
-app: sign in, search, check the tabs. Use a throwaway account — signing in with an unused name
-registers it.
-
-`iSoulseek.xcodeproj` is generated and therefore not committed; `project.yml` is the source of truth.
-
-## Using the app
-
-1. Sign in with a Soulseek username and password. A username that does not exist yet is registered
-   automatically — there is no password reset, so keep the credentials safe. They are stored in the
-   Keychain (`WhenUnlockedThisDeviceOnly`) and used to sign in automatically from then on; the
-   login form only returns if the server rejects them or you sign out.
-2. **Search** — global search across the network. Results arrive as peers reply and are grouped by
-   user; a result with a free slot will start downloading immediately, queued ones may wait a while.
-3. **Browse** — tap *Browse* on a result's section header, or the browse-user button in the search
-   screen.
-   Download single files or whole folders.
-4. **Downloads** — live progress for both directions, swipe to cancel, *Clear finished* to tidy up.
-5. **Files** — downloaded files live in `On My iPhone ▸ iSoulseek ▸ Downloads` because file sharing is
-   enabled for the app, so you can move them out with the Files app.
-6. **Shares** — anything you put in `On My iPhone ▸ iSoulseek ▸ Shared` is served to other users.
+About 165 unit and integration tests, including an in-process mock Soulseek server and peer that
+speak the real wire protocol. Live tests are skipped unless you set
+`SOULSEEK_LIVE=1 SOULSEEK_LIVE_USER=<user> SOULSEEK_LIVE_PASS=<pass>` (use `TEST_RUNNER_`-prefixed
+names for the UI test). Use a throwaway account — unused names are registered.
 
 ## Limitations
 
-- **Foreground only.** iOS suspends raw TCP sockets shortly after the app is backgrounded, so
-  transfers stop when you leave the app. There is no way around this for a peer-to-peer client that
-  does not use `URLSession` background transfers.
-- **Inbound connections.** Downloads you request are delivered by the uploader dialling *you*, so a
-  reachable listening port is needed. On carrier-grade NAT some transfers will not start. The client
-  also asks the server to have the peer connect back through `ConnectToPeer`, which helps but is not
-  a full NAT traversal implementation (no UPnP/NAT-PMP).
-- **No distributed network participation.** The client declares `HaveNoParent` and never accepts
-  children, so it does not receive other users' global searches and therefore does not answer them.
-  Your own searches, browsing and transfers are unaffected. See `docs/PROTOCOL.md` §7.
-- **No obfuscated peer connections** (obfuscation type 1 / RC4).
-- **Chat, rooms, wishlists, user pictures and recommendations are not implemented.**
-- App Store review is unlikely: guideline 5.2.3 covers apps that facilitate downloading media from
-  third-party sources. Expect to build and sideload this yourself.
+- **Foreground only.** iOS suspends raw TCP sockets in the background, so transfers stop when you
+  leave the app.
+- **Inbound connections.** A reachable listening port is needed; carrier-grade NAT can block
+  transfers. `ConnectToPeer` helps, but there is no UPnP/NAT-PMP.
+- **No distributed network participation.** The client sends `HaveNoParent` and never accepts
+  children, so it neither receives nor answers other users' global searches.
+- **No obfuscated peer connections** (type 1 / RC4).
+- **No chat, rooms, wishlists, user pictures or recommendations.**
+- Unlikely to pass App Store review (guideline 5.2.3); build and sideload it yourself.
 
 ## Architecture
 
 ```
 iSoulseek/
   App/         AppDelegate, SceneDelegate, Info.plist, assets
-  Model/       ShareFile/ShareFolder, SearchResult, Transfer, ConnectionState
-  Protocol/    bounds-checked byte reader/writer, message codes, typed messages, zlib
-  Network/     FrameDecoder, SocketConnection (NWConnection), PeerListener (NWListener)
-  Services/    SoulseekClient, TransferManager, PeerSession, ShareIndex, SessionStore, Keychain
-  UI/          Root, Login, Search, Browse, Downloads, Settings
-iSoulseekTests/ unit tests and an in-process mock server
-iSoulseekUITests/ opt-in UI flow test that drives the app against the real network
-docs/PROTOCOL.md  wire-format reference
+  Model/       share, search, transfer and connection types
+  Protocol/    byte reader/writer, message codes and types, zlib
+  Network/     FrameDecoder, SocketConnection, PeerListener
+  Services/    SoulseekClient, TransferManager, PeerSession, ShareIndex,
+               DownloadedFiles, SessionStore, Keychain
+  UI/          Root, Login, MainTabBar, Search, Browse, Downloads, Settings, Theme
+iSoulseekTests/     Unit, Integration, Mock server/peer, Support, Live
+iSoulseekUITests/   opt-in live UI flow
+docs/PROTOCOL.md    wire-format reference
 ```
 
-Everything protocol-related runs on one serial `DispatchQueue` owned by `SoulseekClient`, so the
-protocol layer needs no locking. File I/O is pushed to a separate queue. UI-facing state is
-republished through Combine subjects on the main queue.
+Protocol work runs on one serial queue owned by `SoulseekClient`; file I/O uses a separate queue and
+UI state is published through Combine on the main queue. Wire format details are in
+[`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 
-Protocol summary (framing, message layouts, transfer flow) is in
-[`docs/PROTOCOL.md`](docs/PROTOCOL.md), written from the Nicotine+, Soulseek.NET and aioslsk
-implementations.
+## Security
 
-## Security notes
-
-- Credentials are kept in the Keychain and never logged.
-- Every path that comes from a peer is sanitised before it is used on disk, and the resolved URL is
-  checked to be inside the downloads directory.
-- Message parsing is fully bounds-checked; framing, frame size and decompressed size are all capped,
-  so a hostile peer cannot make the app allocate unbounded memory.
-- Search responses are only accepted for tokens this client issued, checked before the payload is
-  inflated.
-- Inbound file connections are only served when their transfer token matches a transfer we requested
-  or accepted. The reverse indirect route is equally guarded: we dial a `ConnectToPeer` only for a
-  transfer we are actively awaiting, and adopt an inbound `PierceFireWall` only for a token we
-  registered.
-- No third-party code, no web views, no dynamically loaded code, no App Transport Security
-  exceptions.
+- Peer-supplied paths are sanitised, and downloads are confined to the downloads directory.
+- Parsing is bounds-checked with capped frame and decompressed sizes.
+- Search responses are accepted only for our tokens; file connections only for known transfer tokens.
+- Credentials stay in the Keychain and are never logged. No third-party code, web views or App
+  Transport Security exceptions.
