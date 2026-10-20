@@ -65,12 +65,20 @@ final class FailedDownloadLogTests: XCTestCase {
                        "the oldest failures are dropped first")
     }
 
-    func testClearEmptiesTheLog() {
+    /// Queueing the same file again must retire its stale failure row, so the live transfer
+    /// replaces it instead of both showing on the Downloading tab.
+    func testDropRetiresAFailureWhenItsFileIsQueuedAgain() {
         var log = FailedDownloadLog()
-        log.record(failedTransfer(1))
+        log.record(failedTransfer(1, reason: "Could not connect to alice"))
+        var other = failedTransfer(2)
+        other = Transfer(id: 2, username: "BOB", filename: "Music\\other.flac",
+                         size: 100, isUpload: false)
+        other.state = .failed("Peer died")
+        log.record(other)
 
-        log.clear()
+        log.drop(username: "ALICE", filename: "music\\SONG.flac")
 
-        XCTAssertTrue(log.transfers.isEmpty)
+        XCTAssertEqual(log.transfers.map(\.id), [2],
+                       "matching is case-insensitive; other failures stay")
     }
 }

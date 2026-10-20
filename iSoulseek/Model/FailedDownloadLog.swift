@@ -4,8 +4,9 @@ import Foundation
 ///
 /// `TransferManager` drops a failed download from its list immediately, which made downloads that
 /// failed to start disappear within the same moment the "queued" toast appeared. Failed transfers
-/// recorded here stay on the Downloading tab (outside selection mode) until the Transfers screen
-/// is left. Completed downloads are unaffected: they still move to the Downloaded tab.
+/// recorded here live for the whole session — including batch failures that happened before the
+/// Transfers screen was ever opened — and a failure entry is dropped once the same file is queued
+/// again. Completed downloads are unaffected: they still move to the Downloaded tab.
 struct FailedDownloadLog {
 
     /// How many failures are kept before the oldest is dropped.
@@ -33,8 +34,13 @@ struct FailedDownloadLog {
         return isNew
     }
 
-    /// Drops every recorded failure; called when the Transfers screen is left.
-    mutating func clear() {
-        transfers.removeAll()
+    /// Drops the failure entry for a file the user queued again, so the live transfer replaces
+    /// the stale failure row instead of both showing.
+    mutating func drop(username: String, filename: String) {
+        transfers.removeAll {
+            $0.username.caseInsensitiveCompare(username) == .orderedSame
+                && $0.filename.caseInsensitiveCompare(filename) == .orderedSame
+        }
     }
 }
+

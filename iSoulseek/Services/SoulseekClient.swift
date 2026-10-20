@@ -46,6 +46,9 @@ final class SoulseekClient {
     let searchResults = PassthroughSubject<SearchResult, Never>()
     let searchFinished = PassthroughSubject<UInt32, Never>()
     let transferChanges = PassthroughSubject<Transfer, Never>()
+    /// Sent once per failed download, after it has been recorded in ``recentFailedDownloads``,
+    /// so the Transfers screen can surface failures that happened before it was even opened.
+    let failedDownloadEvents = PassthroughSubject<Transfer, Never>()
     let messages = PassthroughSubject<String, Never>()
     let shares = CurrentValueSubject<ShareSnapshot, Never>(.empty)
     let listeningPort = CurrentValueSubject<UInt16, Never>(0)
@@ -53,6 +56,11 @@ final class SoulseekClient {
 
     let store: SessionStore
     let transferManager: TransferManager
+
+    /// Failed downloads of this session, kept so the Transfers screen can show them even when
+    /// they happened before the screen was first opened and its subscription was not live yet.
+    /// Mutated on the main queue only.
+    private(set) var recentFailedDownloads = FailedDownloadLog()
 
     // MARK: Internals
 
@@ -845,7 +853,10 @@ final class SoulseekClient {
 
     private func configureTransfers() {
         transferManager.onUpdate = { [weak self] transfer in
-            self?.publish { self?.transferChanges.send(transfer) }
+            self?.publish {
+                self?.recordFailureIfAny(transfer)
+                self?.transferChanges.send(transfer)
+            }
         }
         transferManager.onUploadFinished = { [weak self] bytes, elapsed in
             guard let self else { return }
@@ -869,6 +880,20 @@ final class SoulseekClient {
             self.send(.connectToPeer(token: token, username: username, type: .fileTransfer))
             return token
         }
+    }
+
+    /// Keeps the session's failed downloads on record and announces them. Runs on the main queue
+    /// (all `onUpdate` publications do), so no locking is needed.
+    private func recordFailureIfAny(_ transfer: Transfer) {
+        guard !transfer.isUpload, case .failed = transfer.state else { return }
+        recentFailedDownloads.record(transfer)
+        failedDownloadEvents.send(transfer)
+    }
+
+    /// Retires the failure entry for a file the user queued again, so the live transfer replaces
+    /// the stale failure row on the Transfers screen. Main queue only, like all mutations.
+    func retireFailedDownload(username: String, filename: String) {
+        recentFailedDownloads.drop(username: username, filename: filename)
     }
 
     // MARK: Keepalive

@@ -20,9 +20,6 @@ final class TransfersViewController: UIViewController {
     private let messageView = MessageView()
 
     private var transfers: [Transfer] = []
-    /// Failed downloads kept on the Downloading tab so their reason is visible; cleared when the
-    /// screen is left.
-    private var failedDownloads = FailedDownloadLog()
     private var downloadedFiles: [DownloadedFile] = []
     private var displayed: [Item] = []
     private var scanScheduled = false
@@ -132,6 +129,13 @@ final class TransfersViewController: UIViewController {
             .sink { [weak self] transfer in self?.merge(transfer) }
             .store(in: &cancellables)
 
+        // Failures are recorded client-side for the whole session, so batch failures that
+        // predate this screen's opening still show up here on the next read.
+        client.failedDownloadEvents
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] transfer in self?.surfaceFailedDownload(transfer) }
+            .store(in: &cancellables)
+
         reloadActiveTransfers()
     }
 
@@ -148,14 +152,6 @@ final class TransfersViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         navigationController?.setToolbarHidden(true, animated: animated)
-    }
-
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        // Failure rows are transient help for the current visit; leaving the screen clears them.
-        guard !failedDownloads.transfers.isEmpty else { return }
-        failedDownloads.clear()
-        rebuild()
     }
 
     private func configureLayout() {
@@ -249,12 +245,19 @@ final class TransfersViewController: UIViewController {
             } else {
                 transfers.append(transfer)
                 AppLog.ui.debug("downloads list: row appeared for #\(transfer.id, privacy: .public) \"\(transfer.localFilename, privacy: .public)\" (\(transfer.stateDescription, privacy: .public))")
+                if !transfer.isUpload {
+                    // The user queued this file again; the live row replaces a stale failure.
+                    client.retireFailedDownload(username: transfer.username,
+                                                filename: transfer.filename)
+                }
                 if isVisible { rebuild() } else { refreshTabTitles() }
             }
         } else {
             transfers.removeAll { $0.id == transfer.id }
-            if !transfer.isUpload, case .failed(let reason) = transfer.state {
-                surfaceFailedDownload(transfer, reason: reason)
+            if transfer.isFailedDownload {
+                // Already recorded and announced through `failedDownloadEvents`; this rebuild
+                // only keeps the row list consistent when the screen is visible.
+                if isVisible { rebuild() }
             } else if existed {
                 if transfer.isUpload {
                     AppLog.ui.info("uploads list: row dropped for #\(transfer.id, privacy: .public) \"\(transfer.localFilename, privacy: .public)\" (\(transfer.stateDescription, privacy: .public))")
@@ -263,17 +266,21 @@ final class TransfersViewController: UIViewController {
                 }
                 if isVisible { rebuild() } else { refreshTabTitles() }
             }
-            if !transfer.isUpload { scheduleDownloadedFilesReload() }
+            if !transfer.isUpload && !transfer.isFailedDownload {
+                scheduleDownloadedFilesReload()
+            }
         }
     }
 
     /// Failed downloads are dropped by the transfer manager the moment they fail, which used to
-    /// make them vanish before the "queued" toast had even gone. Keep the row on the Downloading
-    /// tab (replacing an older entry for the same transfer) and explain what happened.
-    private func surfaceFailedDownload(_ transfer: Transfer, reason: String) {
-        if failedDownloads.record(transfer) {
-            AppLog.ui.info("downloads list: failure surfaced for #\(transfer.id, privacy: .public) \"\(transfer.localFilename, privacy: .public)\" — \(reason, privacy: .public)")
-            Theme.showToast(Self.failureToastMessage(username: transfer.username, reason: reason), in: view)
+    /// make them vanish before the "queued" toast had even gone. The client records them for the
+    /// session; this shows the row and, when this screen is on screen right now, a toast.
+    private func surfaceFailedDownload(_ transfer: Transfer) {
+        guard case .failed(let reason) = transfer.state else { return }
+        AppLog.ui.info("downloads list: failure surfaced for #\(transfer.id, privacy: .public) \"\(transfer.localFilename, privacy: .public)\" — \(reason, privacy: .public)")
+        if view.window != nil, !isSelecting {
+            Theme.showToast(Self.failureToastMessage(username: transfer.username, reason: reason),
+                            in: view)
         }
         rebuild()
     }
@@ -344,8 +351,9 @@ final class TransfersViewController: UIViewController {
         switch currentTab {
         case .downloading:
             // Failed downloads lead the list so users can see why a transfer vanished before the
-            // active rows push them down; failures live in FailedDownloadLog, not the client.
-            displayed = (failedDownloads.transfers + downloads).map(Item.transfer)
+            // active rows push them down; failures live in the client's session log, which also
+            // records batches that failed before this screen was first opened.
+            displayed = (client.recentFailedDownloads.transfers + downloads).map(Item.transfer)
         case .downloaded:
             displayed = downloadedItems(from: downloaded)
         case .uploading:

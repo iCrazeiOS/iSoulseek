@@ -22,8 +22,8 @@ dependencies.
   searching again.
 - **Browse.** Expand folders, filter by name, and download files or whole folders.
 - **Transfers.** *Downloading* shows active downloads with progress, speed and cancel — failed
-  downloads stay listed with their reason (with a toast at failure time) until the screen is left;
-  *Downloaded*
+  downloads stay listed with their reason (with a toast at failure time) for the rest of the
+  session, and queueing the same file again retires its failure row; *Downloaded*
   supports sorting, list/tree views, Quick Look, swipe delete, Show in Files, and a long-press share
   sheet; *Uploading* shows files other users are taking from your share. *Select* chooses transfers
   or downloaded files for bulk deletion/cancellation, with *Select All* for clearing everything in a

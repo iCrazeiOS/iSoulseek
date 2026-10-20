@@ -71,6 +71,9 @@ final class TransferIntegrationTests: XCTestCase {
         assertEventually("the failed transfer stayed in the transfer list", timeout: 3) {
             env.client.transfers().isEmpty
         }
+        assertEventually("the failure was not kept in the session's failure log", timeout: 3) {
+            env.client.recentFailedDownloads.transfers.first?.state == .failed("File not shared.")
+        }
     }
 
     /// Peers may omit the size and signal completion by closing the file connection.

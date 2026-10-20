@@ -58,6 +58,13 @@ struct Transfer: Identifiable, Equatable {
     var stateDescription: String {
         state == .transferring && isUpload ? "Uploading" : state.description
     }
+
+    /// Whether this is a download that ended in failure, as opposed to a failed upload.
+    var isFailedDownload: Bool {
+        guard !isUpload else { return false }
+        if case .failed = state { return true }
+        return false
+    }
 }
 
 /// Outcome of asking to download a file.
