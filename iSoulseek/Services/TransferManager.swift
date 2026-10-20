@@ -183,6 +183,11 @@ final class TransferManager {
     }
 
     func cancel(id: UInt32) {
+        // A selection snapshot can outlive the transfer, so never rewrite a finished transfer
+        // or tear down work that has already completed.
+        if let transfer = transfers.first(where: { $0.id == id }), !transfer.state.isActive {
+            return
+        }
         if let download = downloads.removeValue(forKey: id) {
             download.timeout?.cancel()
             downloadsByKey.removeValue(forKey: download.key)
@@ -215,42 +220,6 @@ final class TransferManager {
             return
         }
         updateTransfer(id) { $0.state = .cancelled }
-    }
-
-    /// Removes every download and empties the downloads directory, including partial files.
-    func deleteAllDownloads(completion: (() -> Void)? = nil) {
-        let usernames = Set(downloads.values.map { $0.username })
-        let connections = Array(downloadConnections.values)
-        let handles = Array(openHandles.values)
-
-        for download in downloads.values {
-            download.timeout?.cancel()
-        }
-        downloads.removeAll()
-        downloadsByKey.removeAll()
-        peerTokenToDownload.removeAll()
-        downloadConnections.removeAll()
-        openHandles.removeAll()
-        progressMarks.removeAll()
-        transfers.removeAll { !$0.isUpload }
-        for connection in connections { connection.cancel() }
-
-        for username in usernames where !hasPendingWork(username: username) {
-            onUserWorkFinished?(username)
-        }
-
-        let root = downloadsDirectory.standardizedFileURL
-        ioQueue.async {
-            for handle in handles { handle.closeFile() }
-            let contents = (try? FileManager.default.contentsOfDirectory(
-                at: root, includingPropertiesForKeys: nil)) ?? []
-            for url in contents {
-                try? FileManager.default.removeItem(at: url)
-            }
-            if let completion {
-                self.queue.async { completion() }
-            }
-        }
     }
 
     func reset() {

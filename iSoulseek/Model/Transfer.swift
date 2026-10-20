@@ -46,6 +46,11 @@ struct Transfer: Identifiable, Equatable {
     var localFilename: String {
         filename.split(whereSeparator: { $0 == "\\" || $0 == "/" }).last.map(String.init) ?? filename
     }
+
+    /// The state in the direction of the transfer, for display in the Transfers screen.
+    var stateDescription: String {
+        state == .transferring && isUpload ? "Uploading" : state.description
+    }
 }
 
 /// Outcome of asking to download a file.

@@ -187,17 +187,13 @@ final class SoulseekClient {
         }
     }
 
-    func cancelTransfer(id: UInt32) {
-        queue.async { self.transferManager.cancel(id: id) }
-    }
-
-    /// Deletes every download, including files already on disk and downloads in progress.
-    func deleteAllDownloads(completion: (() -> Void)? = nil) {
+    /// Cancels one or more transfers. The completion runs on the main queue after the transfer
+    /// manager has processed every cancellation, so callers can safely clean up related files.
+    func cancelTransfers(ids: [UInt32], completion: (() -> Void)? = nil) {
         queue.async {
-            self.transferManager.deleteAllDownloads {
-                guard let completion else { return }
-                DispatchQueue.main.async(execute: completion)
-            }
+            ids.forEach { self.transferManager.cancel(id: $0) }
+            guard let completion else { return }
+            DispatchQueue.main.async(execute: completion)
         }
     }
 

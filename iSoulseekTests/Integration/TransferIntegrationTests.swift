@@ -232,52 +232,6 @@ final class TransferIntegrationTests: XCTestCase {
                       "the downloads root must be kept")
     }
 
-    /// Deleting all downloads removes every file and clears their transfer entries.
-    func testDeletingAllDownloadsRemovesFiles() {
-        let payload = makePayload(2048)
-        env.peer.downloadPayload = payload
-        XCTAssertTrue(env.connectAndWaitForLogin())
-
-        var transfers: [Transfer] = []
-        let cancellable = env.client.transferChanges.sink { transfers.append($0) }
-        defer { cancellable.cancel() }
-
-        env.client.download(username: "MockPeer", filename: "Music\\Album\\one.bin",
-                            size: UInt64(payload.count))
-        assertEventually("first download never completed", timeout: 3) {
-            transfers.last(where: { !$0.isUpload })?.state == .completed
-        }
-
-        env.client.download(username: "MockPeer", filename: "Music\\Album\\two.bin",
-                            size: UInt64(payload.count))
-        assertEventually("second download never completed", timeout: 3) {
-            transfers.filter { !$0.isUpload && $0.state == .completed }.count == 2
-        }
-
-        let first = env.downloadsDirectory.appendingPathComponent("MockPeer/Music/Album/one.bin")
-        let second = env.downloadsDirectory.appendingPathComponent("MockPeer/Music/Album/two.bin")
-        let partial = env.downloadsDirectory.appendingPathComponent(".partials/MockPeer/Music/Album/three.bin")
-        try? FileManager.default.createDirectory(at: partial.deletingLastPathComponent(),
-                                                 withIntermediateDirectories: true)
-        try? Data(repeating: 0xEE, count: 10).write(to: partial)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
-
-        env.client.deleteAllDownloads()
-
-        assertEventually("download files were not deleted", timeout: 3) {
-            !FileManager.default.fileExists(atPath: first.path)
-                && !FileManager.default.fileExists(atPath: second.path)
-                && !FileManager.default.fileExists(atPath: partial.path)
-        }
-        XCTAssertTrue(env.client.transfers().isEmpty)
-        assertEventually("empty folders were not cleaned up", timeout: 3) {
-            !FileManager.default.fileExists(atPath: env.downloadsDirectory.appendingPathComponent("MockPeer").path)
-        }
-        XCTAssertTrue(FileManager.default.fileExists(atPath: env.downloadsDirectory.path),
-                      "the downloads root must be kept")
-    }
-
     // MARK: Upload
 
     func testUploadServesSharedFile() {

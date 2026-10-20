@@ -84,6 +84,21 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(complete.progress, 1)
     }
 
+    func testTransferStateDescriptionReflectsDirection() {
+        var download = Transfer(id: 1, username: "bob", filename: "song.mp3",
+                                size: 1, isUpload: false)
+        download.state = .transferring
+        XCTAssertEqual(download.stateDescription, "Downloading")
+
+        var upload = Transfer(id: 2, username: "bob", filename: "song.mp3",
+                              size: 1, isUpload: true)
+        upload.state = .transferring
+        XCTAssertEqual(upload.stateDescription, "Uploading")
+
+        upload.state = .queued(place: 3)
+        XCTAssertEqual(upload.stateDescription, "Queued (#3)")
+    }
+
     func testConnectionStateHelpers() {
         XCTAssertTrue(ConnectionState.loggedIn(username: "bob").isLoggedIn)
         XCTAssertFalse(ConnectionState.disconnected.isLoggedIn)

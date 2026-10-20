@@ -158,7 +158,7 @@ final class SearchViewController: UIViewController {
         view.addSubview(stack)
 
         // An overlay rather than the table's `backgroundView`, so the empty state is centred in
-        // the same area as the Downloads tab's (above the safe area's bottom edge) instead of
+        // the same area as the Transfers tab's (above the safe area's bottom edge) instead of
         // halfway down the table's full height.
         messageView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(messageView)

@@ -18,9 +18,11 @@ dependencies.
 - **Search.** Results are grouped by user and can be sorted by size, bitrate or duration. Tap or
   swipe a result to download or browse that user; the navigation bar browses any username.
 - **Browse.** Expand folders, filter by name, and download files or whole folders.
-- **Downloads.** *Downloading* shows active downloads and uploads with progress, speed and cancel;
-  *Completed* supports sorting, list/tree views, Quick Look, swipe delete, Show in Files, and a
-  long-press share sheet. *Delete all* removes files and active transfers.
+- **Transfers.** *Downloading* shows active downloads with progress, speed and cancel; *Downloaded*
+  supports sorting, list/tree views, Quick Look, swipe delete, Show in Files, and a long-press share
+  sheet; *Uploading* shows files other users are taking from your share. *Select* chooses transfers
+  or downloaded files for bulk deletion/cancellation, with *Select All* for clearing everything in a
+  tab.
 - **Files.** Downloads go to `On My iPhone ▸ iSoulseek ▸ Downloads`, under the uploader's name.
   Partials stay hidden in `.partials` and resume when retried.
 - **Shares.** Anything in `On My iPhone ▸ iSoulseek ▸ Shared` is served to other users.
@@ -74,7 +76,7 @@ iSoulseek/
   Network/     FrameDecoder, SocketConnection, PeerListener
   Services/    SoulseekClient, TransferManager, PeerSession, ShareIndex,
                DownloadedFiles, SessionStore, Keychain
-  UI/          Root, Login, MainTabBar, Search, Browse, Downloads, Settings, Theme
+  UI/          Root, Login, MainTabBar, Search, Browse, Transfers, Settings, Theme
 iSoulseekTests/     Unit, Integration, Mock server/peer, Support, Live
 iSoulseekUITests/   opt-in live UI flow
 docs/PROTOCOL.md    wire-format reference

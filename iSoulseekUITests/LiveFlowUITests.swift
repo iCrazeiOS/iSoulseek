@@ -44,8 +44,8 @@ final class LiveFlowUITests: XCTestCase {
         let result = app.cells["search.result"].firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 90), "no search result arrived")
 
-        app.tabBars.buttons["Downloads"].tap()
-        XCTAssertTrue(app.navigationBars["Downloads"].waitForExistence(timeout: 10))
+        app.tabBars.buttons["Transfers"].tap()
+        XCTAssertTrue(app.navigationBars["Transfers"].waitForExistence(timeout: 10))
 
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10))

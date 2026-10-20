@@ -22,12 +22,12 @@ final class MainTabBarController: UITabBarController {
         tabBar.scrollEdgeAppearance = tabBar.standardAppearance
 
         let search = SearchViewController(client: client)
-        let downloads = DownloadsViewController(client: client)
+        let transfers = TransfersViewController(client: client)
         let settings = SettingsViewController(client: client)
 
         viewControllers = [
             wrap(search, title: "Search", symbol: "magnifyingglass"),
-            wrap(downloads, title: "Downloads", symbol: "arrow.down.circle"),
+            wrap(transfers, title: "Transfers", symbol: "arrow.up.arrow.down"),
             wrap(settings, title: "Settings", symbol: "gearshape"),
         ]
     }
