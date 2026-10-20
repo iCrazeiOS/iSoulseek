@@ -7,7 +7,8 @@ final class DownloadsViewController: UIViewController {
 
     private enum Item {
         case transfer(Transfer)
-        case file(DownloadedFile)
+        case file(DownloadedFile, depth: Int)
+        case folder(DownloadFolder, depth: Int)
     }
 
     private let client: SoulseekClient
@@ -24,6 +25,8 @@ final class DownloadsViewController: UIViewController {
     private var scanGeneration = 0
     private var previewURL: URL?
     private var sortOrder: DownloadSortOrder = .newest
+    private var layout: DownloadLayout = .list
+    private var expandedFolders: Set<String> = []
 
     private var showsCompleted: Bool {
         get { tabControl.selectedSegmentIndex == 1 }
@@ -36,6 +39,10 @@ final class DownloadsViewController: UIViewController {
         item.accessibilityLabel = "Sort completed downloads"
         return item
     }()
+
+    private lazy var layoutItem = UIBarButtonItem(image: UIImage(systemName: "list.bullet.indent"),
+                                                  style: .plain, target: self,
+                                                  action: #selector(toggleLayout))
 
     private lazy var deleteItem: UIBarButtonItem = {
         let item = UIBarButtonItem(image: UIImage(systemName: "trash.fill"), style: .plain,
@@ -62,10 +69,12 @@ final class DownloadsViewController: UIViewController {
         title = "Downloads"
         view.backgroundColor = .systemBackground
         sortOrder = client.store.downloadSortOrder
+        layout = client.store.downloadLayout
         navigationItem.rightBarButtonItem = deleteItem
 
         configureLayout()
         updateSortItem()
+        updateLayoutItem()
         updateNavigation()
 
         client.transferChanges
@@ -121,7 +130,20 @@ final class DownloadsViewController: UIViewController {
     }
 
     private func updateNavigation() {
-        navigationItem.leftBarButtonItem = showsCompleted ? sortItem : nil
+        navigationItem.leftBarButtonItems = showsCompleted ? [sortItem, layoutItem] : nil
+    }
+
+    private func updateLayoutItem() {
+        let willShowTree = layout == .list
+        layoutItem.image = UIImage(systemName: willShowTree ? "list.bullet.indent" : "list.bullet")
+        layoutItem.accessibilityLabel = willShowTree ? "View as tree" : "View as list"
+    }
+
+    @objc private func toggleLayout() {
+        layout = layout == .list ? .tree : .list
+        client.store.downloadLayout = layout
+        updateLayoutItem()
+        rebuild()
     }
 
     private func updateSortItem() {
@@ -226,13 +248,57 @@ final class DownloadsViewController: UIViewController {
     private func rebuild() {
         let active = transfers.filter { $0.state.isActive }
         let completed = visibleCompletedFiles(active: active)
-        displayed = showsCompleted
-            ? sortOrder.sorted(completed).map(Item.file)
-            : active.map(Item.transfer)
+        displayed = showsCompleted ? completedItems(from: completed) : active.map(Item.transfer)
 
         setTabTitles(activeCount: active.count, completedCount: completed.count)
         tableView.reloadData()
         updateEmptyState()
+    }
+
+    private func completedItems(from files: [DownloadedFile]) -> [Item] {
+        switch layout {
+        case .list:
+            return sortOrder.sorted(files).map { .file($0, depth: 0) }
+        case .tree:
+            return treeItems(in: DownloadTree.build(from: files, sortOrder: sortOrder), depth: 0)
+        }
+    }
+
+    private func treeItems(in folder: DownloadFolder, depth: Int) -> [Item] {
+        let folders = folder.folders.flatMap { child -> [Item] in
+            var items: [Item] = [.folder(child, depth: depth)]
+            if expandedFolders.contains(child.path) {
+                items += treeItems(in: child, depth: depth + 1)
+            }
+            return items
+        }
+        return folders + folder.files.map { .file($0, depth: depth) }
+    }
+
+    private func toggle(_ folder: DownloadFolder, at row: Int, depth: Int) {
+        let children = treeItems(in: folder, depth: depth + 1)
+        let rows = (row + 1..<row + 1 + children.count).map { IndexPath(row: $0, section: 0) }
+        let wasExpanded = expandedFolders.contains(folder.path)
+
+        if wasExpanded {
+            expandedFolders.remove(folder.path)
+            displayed.removeSubrange(row + 1..<row + 1 + children.count)
+        } else {
+            expandedFolders.insert(folder.path)
+            displayed.insert(contentsOf: children, at: row + 1)
+        }
+
+        if let cell = tableView.cellForRow(at: IndexPath(row: row, section: 0)) as? DownloadCell {
+            cell.configure(with: folder, depth: depth, isExpanded: !wasExpanded)
+        }
+
+        tableView.performBatchUpdates {
+            if wasExpanded {
+                tableView.deleteRows(at: rows, with: .top)
+            } else {
+                tableView.insertRows(at: rows, with: .top)
+            }
+        }
     }
 
     private func refreshTabTitles() {
@@ -324,7 +390,7 @@ final class DownloadsViewController: UIViewController {
         let point = gesture.location(in: tableView)
         guard let indexPath = tableView.indexPathForRow(at: point),
               displayed.indices.contains(indexPath.row),
-              case .file(let file) = displayed[indexPath.row],
+              case .file(let file, _) = displayed[indexPath.row],
               FileManager.default.fileExists(atPath: file.url.path) else { return }
 
         let controller = UIActivityViewController(activityItems: [file.url], applicationActivities: nil)
@@ -346,8 +412,11 @@ extension DownloadsViewController: UITableViewDataSource {
         switch displayed[indexPath.row] {
         case .transfer(let transfer):
             (cell as? DownloadCell)?.configure(with: transfer)
-        case .file(let file):
-            (cell as? DownloadCell)?.configure(with: file, showsChevron: true)
+        case .file(let file, let depth):
+            (cell as? DownloadCell)?.configure(with: file, depth: depth, showsFolder: layout == .list)
+        case .folder(let folder, let depth):
+            (cell as? DownloadCell)?.configure(with: folder, depth: depth,
+                                               isExpanded: expandedFolders.contains(folder.path))
         }
         return cell
     }
@@ -359,13 +428,27 @@ extension DownloadsViewController: UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        guard case .file(let file) = displayed[indexPath.row] else { return }
-        presentPreview(for: file)
+        switch displayed[indexPath.row] {
+        case .file(let file, _):
+            presentPreview(for: file)
+        case .folder(let folder, let depth):
+            toggle(folder, at: indexPath.row, depth: depth)
+        case .transfer:
+            break
+        }
     }
 
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath)
     -> UISwipeActionsConfiguration? {
         switch displayed[indexPath.row] {
+        case .folder(let folder, _):
+            let action = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, completion in
+                guard let self else { completion(false); return }
+                self.delete(folder.allFiles, toast: "Deleted \(folder.name)")
+                completion(true)
+            }
+            return UISwipeActionsConfiguration(actions: [action])
+
         case .transfer(let transfer):
             let action = UIContextualAction(style: .destructive, title: "Cancel") { [weak self] _, _, completion in
                 self?.client.cancelTransfer(id: transfer.id)
@@ -373,14 +456,10 @@ extension DownloadsViewController: UITableViewDelegate {
             }
             return UISwipeActionsConfiguration(actions: [action])
 
-        case .file(let file):
+        case .file(let file, _):
             let deleteAction = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, completion in
                 guard let self else { completion(false); return }
-                DownloadedFiles.delete(file.url, upTo: self.client.store.downloadsDirectory)
-                self.scanGeneration += 1
-                self.completedFiles.removeAll { $0.url == file.url }
-                self.rebuild()
-                Theme.showToast("Deleted \(file.name)", in: self.view)
+                self.delete([file], toast: "Deleted \(file.name)")
                 completion(true)
             }
 
@@ -394,6 +473,18 @@ extension DownloadsViewController: UITableViewDelegate {
 
             return UISwipeActionsConfiguration(actions: [deleteAction, filesAction])
         }
+    }
+
+    /// Removes files and updates the list without waiting for the next filesystem scan.
+    private func delete(_ files: [DownloadedFile], toast: String) {
+        let root = client.store.downloadsDirectory
+        files.forEach { DownloadedFiles.delete($0.url, upTo: root) }
+
+        scanGeneration += 1
+        let deleted = Set(files.map(\.url))
+        completedFiles.removeAll { deleted.contains($0.url) }
+        rebuild()
+        Theme.showToast(toast, in: view)
     }
 
     /// Opens the containing folder in Files. There is no public API for this; `shareddocuments://`
@@ -450,6 +541,7 @@ private final class DownloadCell: UITableViewCell {
     private let statusLabel = UILabel()
     private let detailLabel = UILabel()
     private let progressView = UIProgressView(progressViewStyle: .default)
+    private var leadingConstraint: NSLayoutConstraint!
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -461,14 +553,17 @@ private final class DownloadCell: UITableViewCell {
         fatalError("init(coder:) is not supported")
     }
 
-    func configure(with transfer: Transfer, showsChevron: Bool = false) {
+    func configure(with transfer: Transfer) {
         iconView.image = UIImage(systemName: transfer.isUpload ? "arrow.up" : "arrow.down",
                                  withConfiguration: Self.iconConfiguration)
         iconView.tintColor = transfer.isUpload ? .systemOrange : .systemBlue
         nameLabel.text = transfer.localFilename
         statusLabel.text = "\(transfer.username) · \(transfer.state.description)"
         statusLabel.lineBreakMode = .byTruncatingTail
-        accessoryType = showsChevron ? .disclosureIndicator : .none
+        statusLabel.isHidden = false
+        detailLabel.isHidden = false
+        accessoryType = .none
+        setDepth(0)
 
         progressView.isHidden = !transfer.state.isActive
         progressView.progress = transfer.progress
@@ -483,16 +578,39 @@ private final class DownloadCell: UITableViewCell {
         }
     }
 
-    func configure(with file: DownloadedFile, showsChevron: Bool = false) {
+    func configure(with file: DownloadedFile, depth: Int, showsFolder: Bool) {
         let symbol = Theme.mediaSymbol(forExtension: file.url.pathExtension) ?? "doc"
         iconView.image = UIImage(systemName: symbol, withConfiguration: Self.iconConfiguration)
         iconView.tintColor = .secondaryLabel
         nameLabel.text = file.name
         statusLabel.text = file.folder
         statusLabel.lineBreakMode = .byTruncatingMiddle
-        accessoryType = showsChevron ? .disclosureIndicator : .none
+        statusLabel.isHidden = !showsFolder
+        detailLabel.isHidden = false
+        accessoryType = .disclosureIndicator
+        setDepth(depth)
         progressView.isHidden = true
         detailLabel.text = "\(Formatters.bytes(file.size)) · \(file.modified.formatted(date: .abbreviated, time: .shortened))"
+    }
+
+    func configure(with folder: DownloadFolder, depth: Int, isExpanded: Bool) {
+        iconView.image = UIImage(systemName: isExpanded ? "folder.fill" : "folder",
+                                 withConfiguration: Self.iconConfiguration)
+        iconView.tintColor = .systemBlue
+        nameLabel.text = folder.name
+        let count = folder.fileCount
+        let files = "\(count.formatted()) \(count == 1 ? "file" : "files")"
+        statusLabel.text = "\(files) · \(Formatters.bytes(folder.totalSize))"
+        statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.isHidden = false
+        detailLabel.isHidden = true
+        accessoryType = .disclosureIndicator
+        setDepth(depth)
+        progressView.isHidden = true
+    }
+
+    private func setDepth(_ depth: Int) {
+        leadingConstraint.constant = 16 + CGFloat(depth) * 16
     }
 
     private func setup() {
@@ -526,12 +644,14 @@ private final class DownloadCell: UITableViewCell {
         row.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(row)
 
+        leadingConstraint = row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16)
+
         NSLayoutConstraint.activate([
             iconView.widthAnchor.constraint(equalToConstant: 20),
             iconView.heightAnchor.constraint(equalToConstant: 20),
             row.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
             row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10),
-            row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            leadingConstraint,
             row.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
         ])
     }
