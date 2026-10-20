@@ -179,8 +179,19 @@ final class SoulseekClient {
     func download(username: String, filename: String, size: UInt64,
                   completion: ((DownloadStartResult?) -> Void)? = nil) {
         queue.async {
+            AppLog.transfers.info("download requested from \"\(username, privacy: .public)\": \"\(filename, privacy: .public)\" (size \(size, privacy: .public))")
             let result = self.transferManager.enqueueDownload(username: username,
-                                                             filename: filename, size: size)
+                                                              filename: filename, size: size)
+            switch result {
+            case .added(let transfer):
+                AppLog.transfers.info("download #\(transfer.id, privacy: .public) accepted")
+            case .alreadyDownloading(let transfer):
+                AppLog.transfers.debug("duplicate download request; already active (#\(transfer.id, privacy: .public))")
+            case .alreadyDownloaded(let transfer):
+                AppLog.transfers.debug("file already completed on disk (#\(transfer.id, privacy: .public))")
+            case nil:
+                AppLog.transfers.debug("download request returned no result")
+            }
             if let completion {
                 self.replyToMain { completion(result) }
             }
@@ -233,7 +244,10 @@ final class SoulseekClient {
         }
         connection.onFrame = { [weak self] frame in
             guard let self, case .message(let code, let payload) = frame else { return }
-            guard let message = try? ServerMessage.decode(code: code, payload: payload) else { return }
+            guard let message = try? ServerMessage.decode(code: code, payload: payload) else {
+                AppLog.client.debug("server sent undecodable message \(code, privacy: .public) with \(payload.count, privacy: .public) bytes")
+                return
+            }
             self.handleServer(message)
         }
         connection.onClosed = { [weak self] reason in
@@ -414,6 +428,7 @@ final class SoulseekClient {
 
     private func handleInboundPeerInit(connection: SocketConnection, username: String, type: String) {
         guard let kind = ConnectionType(rawValue: type) else {
+            AppLog.peers.debug("inbound peer-init from \"\(username, privacy: .public)\" has unknown type \"\(type, privacy: .public)\"")
             connection.cancel()
             return
         }
@@ -427,6 +442,7 @@ final class SoulseekClient {
             if let existing = sessions[key], existing.isReady {
                 // One connection per peer: keep ours unless it is idle and the peer reconnected.
                 if transferManager.hasPendingWork(username: username) {
+                    AppLog.peers.debug("inbound peer-init from \"\(username, privacy: .public)\" rejected: we already hold a working session")
                     connection.cancel()
                     return
                 }
@@ -434,9 +450,11 @@ final class SoulseekClient {
                 existing.close()
             }
             guard sessions.count < Self.maximumPeerSessions else {
+                AppLog.peers.error("inbound peer-init from \"\(username, privacy: .public)\" rejected: session limit \(Self.maximumPeerSessions, privacy: .public)")
                 connection.cancel()
                 return
             }
+            AppLog.peers.debug("inbound peer session accepted for \"\(username, privacy: .public)\"")
             let session = PeerSession(adopting: connection, username: username,
                                       ownUsername: ownUsername)
             wire(session, key: key)
@@ -453,6 +471,7 @@ final class SoulseekClient {
 
     private func handleInboundPierce(connection: SocketConnection, token: UInt32) {
         guard let pending = pendingPierce.removeValue(forKey: token) else {
+            AppLog.peers.debug("inbound PierceFireWall for unknown token \(token, privacy: .public); trying the upload path")
             // Not one of our pending peer sessions; it may be a downloader answering `ConnectToPeer`.
             if !transferManager.adoptIndirectUploadConnection(connection, token: token) {
                 connection.cancel()
@@ -503,12 +522,21 @@ final class SoulseekClient {
 
     /// An uploader that cannot reach our listening port asks us to dial it and push a file through.
     private func dialFileConnection(_ info: ConnectToPeerInfo) {
-        guard !info.ip.isEmpty, info.ip != "0.0.0.0", info.port > 0 else { return }
+        guard !info.ip.isEmpty, info.ip != "0.0.0.0", info.port > 0 else {
+            AppLog.peers.error("ConnectToPeer (file transfer) for \"\(info.username, privacy: .public)\" has no usable address: \(info.ip, privacy: .public):\(info.port, privacy: .public)")
+            return
+        }
         guard info.username.lowercased() != ownUsername.lowercased() else { return }
 
         let key = info.username.lowercased()
-        guard !fileDialsInFlight.contains(key) else { return }
-        guard transferManager.expectsFileConnection(username: info.username) else { return }
+        guard !fileDialsInFlight.contains(key) else {
+            AppLog.peers.debug("file dial to \"\(info.username, privacy: .public)\" already in flight")
+            return
+        }
+        guard transferManager.expectsFileConnection(username: info.username) else {
+            AppLog.peers.debug("ignoring ConnectToPeer (file transfer) from \"\(info.username, privacy: .public)\": no download expects their file connection")
+            return
+        }
         fileDialsInFlight.insert(key)
 
         let connection = SocketConnection(host: info.ip, port: info.port, mode: .initChannel,
@@ -533,14 +561,17 @@ final class SoulseekClient {
     private func provideSession(username: String, completion: @escaping (PeerSession?) -> Void) {
         let key = username.lowercased()
         if let session = sessions[key], session.isReady {
+            AppLog.peers.debug("reusing ready session for \"\(username, privacy: .public)\"")
             completion(session)
             return
         }
         if sessionRequests[key] != nil {
+            AppLog.peers.debug("joined existing session request for \"\(username, privacy: .public)\"")
             sessionRequests[key]?.append(completion)
             return
         }
         guard sessions.count < Self.maximumPeerSessions else {
+            AppLog.peers.error("refusing session for \"\(username, privacy: .public)\": \(Self.maximumPeerSessions, privacy: .public) sessions already open")
             completion(nil)
             return
         }
@@ -548,7 +579,7 @@ final class SoulseekClient {
 
         let timeout = DispatchWorkItem { [weak self] in
             guard let self, self.sessions[key] == nil else { return }
-            self.failSessionRequests(key: key)
+            self.failSessionRequests(key: key, reason: "timed out")
         }
         sessionTimeouts[key] = timeout
         queue.asyncAfter(deadline: .now() + Self.peerConnectTimeout, execute: timeout)
@@ -556,9 +587,10 @@ final class SoulseekClient {
         resolveAddress(username: username) { [weak self] ip, port in
             guard let self else { return }
             guard !ip.isEmpty, ip != "0.0.0.0", port > 0 else {
-                self.failSessionRequests(key: key)
+                self.failSessionRequests(key: key, reason: "no usable address \(ip):\(port)")
                 return
             }
+            AppLog.peers.debug("dialling \"\(username, privacy: .public)\" at \(ip, privacy: .public):\(port, privacy: .public)")
             self.purgePendingPierce()
             let token = self.allocateToken()
             self.pendingPierce[token] = (username, Date())
@@ -599,6 +631,7 @@ final class SoulseekClient {
     }
 
     private func sessionClosed(key: String, session: PeerSession) {
+        AppLog.peers.debug("peer session with \"\(key, privacy: .public)\" closed")
         if sessions[key] === session {
             sessions.removeValue(forKey: key)
         }
@@ -607,13 +640,15 @@ final class SoulseekClient {
             replyToMain { pending(.failure(SoulseekError.peerUnavailable(session.username))) }
         }
         if sessions[key] == nil {
-            failSessionRequests(key: key)
+            failSessionRequests(key: key, reason: "session closed")
         }
     }
 
-    private func failSessionRequests(key: String) {
+    private func failSessionRequests(key: String, reason: String) {
         sessionTimeouts.removeValue(forKey: key)?.cancel()
         let waiters = sessionRequests.removeValue(forKey: key) ?? []
+        guard !waiters.isEmpty else { return }
+        AppLog.peers.error("peer session for \"\(key, privacy: .public)\" failed (\(reason, privacy: .public)); failing \(waiters.count, privacy: .public) pending request(s)")
         for waiter in waiters { waiter(nil) }
     }
 
@@ -644,9 +679,11 @@ final class SoulseekClient {
             return
         }
         addressRequests[key] = [completion]
+        AppLog.peers.debug("asking the server for the address of \"\(username, privacy: .public)\"")
         send(.getPeerAddress(username))
         queue.asyncAfter(deadline: .now() + Self.addressTimeout) { [weak self] in
             guard let self, let waiters = self.addressRequests.removeValue(forKey: key) else { return }
+            AppLog.peers.error("server never answered GetPeerAddress for \"\(username, privacy: .public)\"")
             for waiter in waiters { waiter("", 0) }
         }
     }

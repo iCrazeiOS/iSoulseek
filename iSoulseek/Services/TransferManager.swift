@@ -119,6 +119,7 @@ final class TransferManager {
                                                   username: username, virtualPath: filename),
               let partURL = PathSanitizer.destination(in: partialsDirectory,
                                                       username: username, virtualPath: filename) else {
+            AppLog.transfers.error("enqueue rejected unsanitizable path from \"\(username, privacy: .public)\": \"\(filename, privacy: .public)\" (size \(size, privacy: .public))")
             return nil
         }
 
@@ -126,6 +127,7 @@ final class TransferManager {
         if let active = downloads.values.first(where: {
             $0.url.standardizedFileURL.path.lowercased() == destination
         }), let transfer = transfers.first(where: { $0.id == active.id }) {
+            AppLog.transfers.debug("enqueue from \"\(username, privacy: .public)\" while \"\(filename, privacy: .public)\" is already downloading (#\(transfer.id, privacy: .public))")
             return .alreadyDownloading(transfer)
         }
 
@@ -151,6 +153,7 @@ final class TransferManager {
         transfer.transferred = offset
         transfer.state = size > 0 && offset == size ? .completed : .negotiating
         transfers.append(transfer)
+        AppLog.transfers.info("download #\(id, privacy: .public) queued from \"\(username, privacy: .public)\": \"\(filename, privacy: .public)\" (size \(size, privacy: .public), resume offset \(offset, privacy: .public))")
         onUpdate?(transfer)
 
         guard transfer.state != .completed else {
@@ -168,6 +171,7 @@ final class TransferManager {
         sessionProvider?(username) { [weak self] session in
             guard let self, var current = self.downloads[id] else { return }
             guard let session else {
+                AppLog.transfers.error("download #\(id, privacy: .public) failed: no peer session for \"\(username, privacy: .public)\"")
                 self.failDownload(username: username, filename: filename,
                                   reason: "Could not connect to \(username)")
                 return
@@ -175,6 +179,7 @@ final class TransferManager {
             if current.isStarted { return }
             current.isStarted = true
             self.downloads[id] = current
+            AppLog.transfers.debug("download #\(id, privacy: .public) sent QueueUpload to \"\(username, privacy: .public)\"")
             session.send(.queueUpload(filename: filename))
             self.scheduleNegotiationTimeout(id)
         }
@@ -259,8 +264,10 @@ final class TransferManager {
         case .placeInQueueRequest(let filename):
             handlePlaceInQueueRequest(filename: filename, from: session)
         case .uploadDenied(let filename, let reason):
+            AppLog.transfers.info("peer \"\(session.username, privacy: .public)\" denied upload of \"\(filename, privacy: .public)\": \(reason, privacy: .public)")
             failDownload(username: session.username, filename: filename, reason: reason)
         case .uploadFailed(let filename):
+            AppLog.transfers.info("peer \"\(session.username, privacy: .public)\" reported upload failure for \"\(filename, privacy: .public)\"")
             failDownload(username: session.username, filename: filename, reason: "Upload failed")
         default:
             break
@@ -270,10 +277,16 @@ final class TransferManager {
     private func handleTransferRequest(_ info: TransferRequestInfo, from session: PeerSession) {
         // Only the "I am about to upload to you" direction is supported; legacy pull requests
         // are ignored, since every current client uses QueueUpload.
-        guard info.direction == .upload else { return }
+        guard info.direction == .upload else {
+            AppLog.transfers.debug("peer \"\(session.username, privacy: .public)\" sent a download-direction TransferRequest for \"\(info.filename, privacy: .public)\"; ignoring")
+            return
+        }
 
         let key = Self.key(username: session.username, filename: info.filename)
-        guard let id = downloadsByKey[key], var download = downloads[id] else { return }
+        guard let id = downloadsByKey[key], var download = downloads[id] else {
+            AppLog.transfers.info("peer \"\(session.username, privacy: .public)\" offered \"\(info.filename, privacy: .public)\" for unknown download; ignoring")
+            return
+        }
 
         peerTokenToDownload[info.token] = id
         download.awaitingFileConnection = true
@@ -308,6 +321,7 @@ final class TransferManager {
             header.removeAll()
 
             guard let id = self.peerTokenToDownload[token], let download = self.downloads[id] else {
+                AppLog.transfers.error("file connection presented unknown token \(token, privacy: .public)")
                 connection.cancel()
                 return
             }
@@ -644,6 +658,7 @@ final class TransferManager {
             do {
                 try handle.write(contentsOf: chunk)
             } catch {
+                AppLog.transfers.fault("download #\(id, privacy: .public) failed to write a chunk: \(error.localizedDescription, privacy: .public)")
                 self.queue.async {
                     self.failDownload(username: download.username, filename: download.filename,
                                       reason: "Could not write to disk")
@@ -683,11 +698,13 @@ final class TransferManager {
             ? download.transferred >= download.expectedSize
             : download.transferred > 0
         guard reachedEnd else {
+            AppLog.transfers.error("download #\(id, privacy: .public) closed early: got \(download.transferred, privacy: .public) of \(download.expectedSize, privacy: .public) bytes")
             failDownload(username: download.username, filename: download.filename,
                          reason: "Connection closed early")
             return
         }
 
+        AppLog.transfers.debug("download #\(id, privacy: .public) received, finalising")
         downloads[id]?.isFinishing = true
         downloadConnections.removeValue(forKey: id)?.cancel()
 
@@ -706,11 +723,13 @@ final class TransferManager {
         }
 
         guard Self.move(download.partURL, to: download.url) else {
+            AppLog.transfers.fault("download #\(id, privacy: .public) could not promote partial to \"\(download.url.path, privacy: .public)\"")
             failDownload(username: download.username, filename: download.filename,
                          reason: "Could not save the download")
             return
         }
 
+        AppLog.transfers.info("download #\(id, privacy: .public) completed: \"\(download.filename, privacy: .public)\"")
         downloads.removeValue(forKey: id)
         download.timeout?.cancel()
         downloadsByKey.removeValue(forKey: download.key)
@@ -756,6 +775,7 @@ final class TransferManager {
     private func failDownload(username: String, filename: String, reason: String) {
         let key = Self.key(username: username, filename: filename)
         guard let id = downloadsByKey[key] else { return }
+        AppLog.transfers.error("download #\(id, privacy: .public) from \"\(username, privacy: .public)\": \"\(filename, privacy: .public)\" FAILED — \(reason, privacy: .public)")
         downloads.removeValue(forKey: id)
         downloadsByKey.removeValue(forKey: key)
         downloadConnections.removeValue(forKey: id)?.cancel()

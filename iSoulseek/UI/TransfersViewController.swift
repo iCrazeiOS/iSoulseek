@@ -237,11 +237,17 @@ final class TransfersViewController: UIViewController {
                 if isVisible { updateVisibleTransfer(transfer) }
             } else {
                 transfers.append(transfer)
+                AppLog.ui.debug("downloads list: row appeared for #\(transfer.id, privacy: .public) \"\(transfer.localFilename, privacy: .public)\" (\(transfer.stateDescription, privacy: .public))")
                 if isVisible { rebuild() } else { refreshTabTitles() }
             }
         } else {
             transfers.removeAll { $0.id == transfer.id }
             if existed {
+                if transfer.isUpload {
+                    AppLog.ui.info("uploads list: row dropped for #\(transfer.id, privacy: .public) \"\(transfer.localFilename, privacy: .public)\" (\(transfer.stateDescription, privacy: .public))")
+                } else {
+                    AppLog.ui.info("downloads list: row dropped for #\(transfer.id, privacy: .public) \"\(transfer.localFilename, privacy: .public)\" (\(transfer.stateDescription, privacy: .public))")
+                }
                 if isVisible { rebuild() } else { refreshTabTitles() }
             }
             if !transfer.isUpload { scheduleDownloadedFilesReload() }

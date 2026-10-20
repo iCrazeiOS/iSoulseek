@@ -171,12 +171,16 @@ final class BrowseViewController: UIViewController {
             guard let self else { return }
             switch outcome {
             case .added:
+                AppLog.ui.info("browse download accepted: \"\(path, privacy: .public)\" from \"\(self.username, privacy: .public)\"")
                 Theme.showToast("Added \(file.name) to downloads", in: self.view)
             case .alreadyDownloading:
+                AppLog.ui.debug("browse download already active: \"\(path, privacy: .public)\"")
                 Theme.showToast("Already downloading \(file.name)", in: self.view)
             case .alreadyDownloaded:
+                AppLog.ui.debug("browse download already completed: \"\(path, privacy: .public)\"")
                 Theme.showToast("Already downloaded \(file.name)", in: self.view)
             case nil:
+                AppLog.ui.error("browse download REJECTED outright: \"\(path, privacy: .public)\" from \"\(self.username, privacy: .public)\"")
                 Theme.showToast("Could not download \(file.name)", in: self.view)
             }
         }
@@ -184,8 +188,26 @@ final class BrowseViewController: UIViewController {
 
     private func download(folder: ShareFolder) {
         guard !folder.files.isEmpty else { return }
+        var added = 0
+        var duplicates = 0
+        var completedAlready = 0
+        var rejected = 0
         for file in folder.files {
-            client.download(username: username, filename: folder.path + "\\" + file.name, size: file.size)
+            client.download(username: username, filename: folder.path + "\\" + file.name,
+                            size: file.size) { outcome in
+                switch outcome {
+                case .added: added += 1
+                case .alreadyDownloading: duplicates += 1
+                case .alreadyDownloaded: completedAlready += 1
+                case nil:
+                    rejected += 1
+                    AppLog.ui.error("folder download REJECTED outright: \(file.name, privacy: .public) in \"\(folder.path, privacy: .public)\"")
+                }
+            }
+        }
+        // The completion hops to the main queue, so by now every enqueue has been counted.
+        DispatchQueue.main.async {
+            AppLog.ui.info("folder download \"\(folder.path, privacy: .public)\": \(added, privacy: .public) queued, \(duplicates, privacy: .public) duplicates, \(completedAlready, privacy: .public) already on disk, \(rejected, privacy: .public) rejected")
         }
         Theme.showToast("Queued \(folder.files.count) files", in: view)
     }

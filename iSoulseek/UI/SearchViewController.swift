@@ -468,12 +468,16 @@ final class SearchViewController: UIViewController {
             guard let self else { return }
             switch outcome {
             case .added:
+                AppLog.ui.info("search download accepted: \"\(result.file.name, privacy: .public)\" from \"\(result.username, privacy: .public)\"")
                 Theme.showToast("Added \(result.file.name) to downloads", in: self.view)
             case .alreadyDownloading:
+                AppLog.ui.debug("search download already active: \"\(result.file.name, privacy: .public)\"")
                 Theme.showToast("Already downloading \(result.file.name)", in: self.view)
             case .alreadyDownloaded:
+                AppLog.ui.debug("search download already completed: \"\(result.file.name, privacy: .public)\"")
                 Theme.showToast("Already downloaded \(result.file.name)", in: self.view)
             case nil:
+                AppLog.ui.error("search download REJECTED outright: \"\(result.file.name, privacy: .public)\" from \"\(result.username, privacy: .public)\"")
                 Theme.showToast("Could not download \(result.file.name)", in: self.view)
             }
         }
