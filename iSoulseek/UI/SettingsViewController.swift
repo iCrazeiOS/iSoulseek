@@ -118,7 +118,7 @@ final class SettingsViewController: UIViewController {
 
         let account = [
             Item(title: "Username", value: store.username.isEmpty ? "—" : store.username),
-            Item(title: "Sign out", isDestructive: true, action: { [weak self] in self?.client.signOut() }),
+            Item(title: "Sign out", isDestructive: true, action: { [weak self] in self?.confirmSignOut() }),
         ]
 
         let search = [
@@ -231,6 +231,19 @@ final class SettingsViewController: UIViewController {
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         Theme.configurePopover(alert, in: tableView)
+        present(alert, animated: true)
+    }
+
+    private func confirmSignOut() {
+        let alert = UIAlertController(
+            title: "Sign out?",
+            message: "iSoulseek forgets your saved password and disconnects. Active transfers stop, "
+                + "and you'll need to sign in again to reconnect.",
+            preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Sign out", style: .destructive) { [weak self] _ in
+            self?.client.signOut()
+        })
         present(alert, animated: true)
     }
 
