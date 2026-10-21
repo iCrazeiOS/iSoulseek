@@ -38,6 +38,10 @@ final class TransfersViewController: UIViewController {
         TransferTab(rawValue: tabControl.selectedSegmentIndex) ?? .downloading
     }
 
+    /// The segment to show first, when something other than the saved preference should win — a
+    /// Home Screen quick action, for instance. Cleared once the screen has been laid out.
+    private var pendingTab: TransferTab?
+
     private var activeTransfers: [Transfer] {
         transfers.filter { $0.state.isActive }
     }
@@ -101,8 +105,10 @@ final class TransfersViewController: UIViewController {
     private lazy var shareGesture = UILongPressGestureRecognizer(target: self,
                                                                  action: #selector(handleLongPress(_:)))
 
-    init(client: SoulseekClient) {
+    /// - Parameter tab: Segment to show first. `nil` uses the saved preference.
+    init(client: SoulseekClient, tab: TransferTab? = nil) {
         self.client = client
+        self.pendingTab = tab
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -155,7 +161,8 @@ final class TransfersViewController: UIViewController {
     }
 
     private func configureLayout() {
-        tabControl.selectedSegmentIndex = client.store.transferTab.rawValue
+        tabControl.selectedSegmentIndex = (pendingTab ?? client.store.transferTab).rawValue
+        pendingTab = nil
         tabControl.addTarget(self, action: #selector(tabChanged), for: .valueChanged)
         tabControl.translatesAutoresizingMaskIntoConstraints = false
 
@@ -189,6 +196,19 @@ final class TransfersViewController: UIViewController {
             messageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             messageView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
         ])
+    }
+
+    /// Shows `tab` now, or the next time the screen is laid out. Used by the startup tab and the
+    /// Home Screen quick actions.
+    func showTab(_ tab: TransferTab) {
+        guard isViewLoaded else {
+            pendingTab = tab
+            return
+        }
+        // Selection freezes the rows, so a segment change waits until it ends.
+        guard !isSelecting, currentTab != tab else { return }
+        tabControl.selectedSegmentIndex = tab.rawValue
+        tabChanged()
     }
 
     private func updateNavigation() {

@@ -77,6 +77,13 @@ targets:
         LSSupportsOpeningDocumentsInPlace: true
         ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: iSoulseek connects to peers on your local network for file transfers.
+        UIApplicationShortcutItems:
+          - UIApplicationShortcutItemType: com.icraze.iSoulseek.search
+            UIApplicationShortcutItemTitle: Search
+            UIApplicationShortcutItemIconSymbolName: magnifyingglass
+          - UIApplicationShortcutItemType: com.icraze.iSoulseek.downloads
+            UIApplicationShortcutItemTitle: View Downloads
+            UIApplicationShortcutItemIconSymbolName: arrow.down.circle
 
   iSoulseekTests:
     type: bundle.unit-test

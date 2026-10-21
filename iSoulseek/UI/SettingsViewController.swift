@@ -129,6 +129,11 @@ final class SettingsViewController: UIViewController {
                  action: { [weak self] in self?.editSearchOptions() }),
         ]
 
+        let startup = [
+            Item(title: "Open on launch", value: store.startupTab.displayName,
+                 accessory: .disclosureIndicator, action: { [weak self] in self?.chooseStartupTab() }),
+        ]
+
         let shares = [
             Item(title: "Shared folder", subtitle: store.shareDirectory.path, style: .subtitle),
             Item(title: "Folders", value: "\(snapshot.folderCount)"),
@@ -149,6 +154,10 @@ final class SettingsViewController: UIViewController {
         sections = [
             Section(header: "Connection", footer: nil, items: connection),
             Section(header: "Account", footer: nil, items: account),
+            Section(header: "Startup",
+                    footer: "The tab iSoulseek opens to, including from the Home Screen icon's "
+                        + "quick actions.",
+                    items: startup),
             Section(header: "Search results",
                     footer: "Applied to every search. You can also change these from the search screen.",
                     items: search),
@@ -217,6 +226,22 @@ final class SettingsViewController: UIViewController {
             let title = order == client.store.defaultSearchSortOrder ? "✓ \(order.displayName)" : order.displayName
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                 self?.client.store.setDefaultSearchSortOrder(order)
+                self?.rebuild()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        Theme.configurePopover(alert, in: tableView)
+        present(alert, animated: true)
+    }
+
+    private func chooseStartupTab() {
+        let alert = UIAlertController(title: "Startup tab",
+                                      message: "The tab iSoulseek opens to.",
+                                      preferredStyle: .actionSheet)
+        for tab in AppTab.allCases {
+            let title = tab == client.store.startupTab ? "✓ \(tab.displayName)" : tab.displayName
+            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                self?.client.store.startupTab = tab
                 self?.rebuild()
             })
         }

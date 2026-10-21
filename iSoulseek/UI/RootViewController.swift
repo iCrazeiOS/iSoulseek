@@ -15,6 +15,10 @@ final class RootViewController: UIViewController {
     private var reconnectWorkItem: DispatchWorkItem?
     private var reconnectAttempt = 0
 
+    /// A Home Screen quick action's destination, held until the tab bar is on screen. The user may
+    /// still have to sign in first, so the request outlives the login screen.
+    private var pendingTab: AppTab?
+
     init(client: SoulseekClient) {
         self.client = client
         super.init(nibName: nil, bundle: nil)
@@ -113,11 +117,31 @@ final class RootViewController: UIViewController {
         scheduleReconnect()
     }
 
+    // MARK: Quick actions
+
+    /// Opens `tab` now, or as soon as the tab bar can be shown.
+    func openTab(_ tab: AppTab) {
+        pendingTab = tab
+        guard let tabs = current as? MainTabBarController else { return }
+        showPendingTab(in: tabs)
+    }
+
+    private func showPendingTab(in tabs: MainTabBarController) {
+        guard let tab = pendingTab else { return }
+        pendingTab = nil
+        tabs.open(tab)
+    }
+
     // MARK: Screens
 
     private func showMain() {
-        guard !(current is MainTabBarController) else { return }
-        swap(to: MainTabBarController(client: client))
+        if let tabs = current as? MainTabBarController {
+            showPendingTab(in: tabs)
+            return
+        }
+        let tabs = MainTabBarController(client: client)
+        swap(to: tabs)
+        showPendingTab(in: tabs)
     }
 
     private func showLogin() {

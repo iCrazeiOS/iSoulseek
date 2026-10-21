@@ -15,6 +15,7 @@ final class SessionStore {
         static let downloadSortOrder = "downloadSortOrder"
         static let downloadLayout = "downloadLayout"
         static let transferTab = "transferTab"
+        static let startupTab = "startupTab"
     }
 
     static let defaultServerHost = "server.slsknet.org"
@@ -142,6 +143,12 @@ final class SessionStore {
     var transferTab: TransferTab {
         get { TransferTab(rawValue: defaults.integer(forKey: Key.transferTab)) ?? .downloading }
         set { defaults.set(newValue.rawValue, forKey: Key.transferTab) }
+    }
+
+    /// The tab opened when the app launches, edited from Settings.
+    var startupTab: AppTab {
+        get { AppTab(rawValue: defaults.integer(forKey: Key.startupTab)) ?? .search }
+        set { defaults.set(newValue.rawValue, forKey: Key.startupTab) }
     }
 
     var isConfigured: Bool { !username.isEmpty && !password.isEmpty }

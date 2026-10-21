@@ -23,11 +23,13 @@ dependencies.
   for the session. *Downloaded* has sorting, list/tree views, Quick Look, swipe delete, Show in
   Files and share. *Uploading* lists what others are taking from your share. *Select* does bulk
   cancel/delete, with *Select All* per tab.
+- **Home Screen shortcuts.** Long-pressing the icon offers *Search* and *View Downloads*, which open
+  straight to those tabs. Settings ▸ Startup picks which tab the app opens to normally.
 - **Files.** Downloads land in `On My iPhone ▸ iSoulseek ▸ Downloads` under `<uploader>/<album>`.
   Partials stay hidden in `.partials` and resume on retry.
 - **Shares.** Everything in `On My iPhone ▸ iSoulseek ▸ Shared` is served to other users.
-- **Settings.** Server and ports, status, share counts and rescan, search sort and filters, activity
-  log, sign out.
+- **Settings.** Server and ports, status, share counts and rescan, startup tab, search sort and
+  filters, activity log, sign out.
 
 ## Build and run
 
