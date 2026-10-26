@@ -1072,6 +1072,20 @@ final class SoulseekClient {
         recentFailedDownloads.drop(username: username, filename: filename)
     }
 
+    /// Drops failures the user deleted from the Downloading tab. The transfer manager already
+    /// discarded failed transfers, so this log is the only place those rows still exist.
+    /// Main queue only, like every other mutation of the log.
+    func dismissFailedDownloads(ids: Set<UInt32>) {
+        let dismissed = recentFailedDownloads.remove(ids: ids)
+        guard !dismissed.isEmpty else { return }
+        queue.async {
+            for transfer in dismissed {
+                self.transferManager.discardPartial(username: transfer.username,
+                                                    filename: transfer.filename)
+            }
+        }
+    }
+
     // MARK: Keepalive
 
     private func startPing() {

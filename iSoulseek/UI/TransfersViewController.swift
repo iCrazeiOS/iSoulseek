@@ -71,7 +71,11 @@ final class TransfersViewController: UIViewController {
     /// Transfers the current tab can select. Empty while the Downloaded tab is showing.
     private var selectableTransferIDs: Set<UInt32> {
         guard currentTab != .downloaded else { return [] }
-        let candidates = currentTab == .uploading ? activeUploads : activeDownloads
+        // Failure rows come from the client's log, not from `transfers`, so they must be added
+        // explicitly or Select All silently skips them.
+        let candidates = currentTab == .uploading
+            ? activeUploads
+            : activeDownloads + client.recentFailedDownloads.transfers
         return Set(candidates.map(\.id))
     }
 
@@ -618,10 +622,17 @@ final class TransfersViewController: UIViewController {
 
         let root = client.store.downloadsDirectory
         let selected = transfers.filter { selectedTransfers.contains($0.id) }
+        // Failed transfers are discarded by TransferManager when they fail, so they are absent
+        // from `transfers` and `cancelTransfers` is a no-op for them; their rows live only in the
+        // client's session log.
+        let selectedFailures = client.recentFailedDownloads.transfers.filter {
+            selectedTransfers.contains($0.id)
+        }
         var urls = selectedFiles
         if currentTab == .downloading {
             // A selected download may have finished while the user was selecting; remove its
-            // completed file as well as cancelling the transfer.
+            // completed file as well as cancelling the transfer. Failed downloads are skipped:
+            // a pre-existing file at their destination belongs to an earlier download.
             for transfer in selected where !transfer.isUpload {
                 guard let url = PathSanitizer.downloadDestination(in: root, username: transfer.username,
                                                           virtualPath: transfer.filename) else { continue }
@@ -632,7 +643,7 @@ final class TransfersViewController: UIViewController {
             }
         }
 
-        let count = selectedCount
+        let count = selected.count + selectedFailures.count + selectedFiles.count
         let isUploading = currentTab == .uploading
         let ids = selected.map(\.id)
         let files = Array(urls)
@@ -642,6 +653,7 @@ final class TransfersViewController: UIViewController {
         selectionActionItem.isEnabled = false
         selectAllItem.isEnabled = false
 
+        client.dismissFailedDownloads(ids: Set(selectedFailures.map(\.id)))
         client.cancelTransfers(ids: ids) { [weak self] in
             guard let self else { return }
             DispatchQueue.global(qos: .userInitiated).async {
@@ -762,8 +774,17 @@ extension TransfersViewController: UITableViewDelegate {
             return UISwipeActionsConfiguration(actions: [action])
 
         case .transfer(let transfer):
-            let action = UIContextualAction(style: .destructive, title: "Cancel") { [weak self] _, _, completion in
-                self?.client.cancelTransfers(ids: [transfer.id])
+            let isFailed = transfer.isFailedDownload
+            let action = UIContextualAction(style: .destructive,
+                                            title: isFailed ? "Delete" : "Cancel") { [weak self] _, _, completion in
+                guard let self else { completion(false); return }
+                if isFailed {
+                    self.client.dismissFailedDownloads(ids: [transfer.id])
+                    self.rebuild()
+                    Theme.showToast("Deleted \(transfer.localFilename)", in: self.view)
+                } else {
+                    self.client.cancelTransfers(ids: [transfer.id])
+                }
                 completion(true)
             }
             return UISwipeActionsConfiguration(actions: [action])

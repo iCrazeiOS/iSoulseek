@@ -94,6 +94,30 @@ final class TransferManagerTests: XCTestCase {
         }
     }
 
+    func testDiscardPartialDeletesTheFileAndItsEmptyFolders() throws {
+        let partial = try write(".partials/alice/Music/song.flac", bytes: 40)
+
+        manager.discardPartial(username: "alice", filename: "Music\\song.flac")
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: partial.path))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: root.appendingPathComponent(".partials/alice").path),
+            "the emptied uploader folder should be pruned")
+    }
+
+    func testDiscardPartialKeepsDataALiveDownloadResumedFrom() throws {
+        let partial = try write(".partials/alice/Music/song.flac", bytes: 40)
+        guard case .added = manager.enqueueDownload(username: "alice",
+                                                    filename: "Music\\song.flac", size: 100) else {
+            return XCTFail("download was not queued")
+        }
+
+        manager.discardPartial(username: "alice", filename: "Music\\song.flac")
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: partial.path),
+                      "a queued retry owns the partial now")
+    }
+
     // MARK: Failure surfacing
 
     /// A download whose session can never be established must publish its failure with a reason

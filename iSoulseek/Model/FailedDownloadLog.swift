@@ -42,5 +42,14 @@ struct FailedDownloadLog {
                 && $0.filename.caseInsensitiveCompare(filename) == .orderedSame
         }
     }
+
+    /// Removes failures the user dismissed from the Transfers screen, returning them so the
+    /// caller can discard whatever local data they left behind.
+    @discardableResult
+    mutating func remove(ids: Set<UInt32>) -> [Transfer] {
+        let removed = transfers.filter { ids.contains($0.id) }
+        transfers.removeAll { ids.contains($0.id) }
+        return removed
+    }
 }
 

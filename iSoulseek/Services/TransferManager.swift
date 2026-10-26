@@ -245,6 +245,19 @@ final class TransferManager {
         updateTransfer(id) { $0.state = .cancelled }
     }
 
+    /// Deletes the hidden partial kept for a failed download, e.g. when the user dismisses the
+    /// failure instead of retrying. Runs on the client queue: deleting here, rather than on the
+    /// I/O queue, keeps the unlink ordered against `enqueueDownload`'s resume-offset read. A live
+    /// download for the same file already owns the partial, so it is left alone.
+    func discardPartial(username: String, filename: String) {
+        let key = Self.key(username: username, filename: filename)
+        guard downloadsByKey[key] == nil,
+              let partURL = PathSanitizer.downloadDestination(in: partialsDirectory,
+                                                              username: username,
+                                                              virtualPath: filename) else { return }
+        DownloadedFiles.delete(partURL, upTo: partialsDirectory)
+    }
+
     func reset() {
         for (_, download) in downloads {
             download.timeout?.cancel()

@@ -1,4 +1,5 @@
 import Combine
+import UIKit
 import XCTest
 @testable import iSoulseek
 
@@ -147,6 +148,100 @@ final class RegressionTests: XCTestCase {
         assertEventually("the retry never completed", timeout: 3) {
             transfers.contains { !$0.isUpload && $0.filename == filename && $0.state == .completed }
         }
+    }
+
+    /// Dismissing a failed download discards its hidden partial without touching a finished file
+    /// that already sits at the same destination.
+    func testDismissingAFailureDiscardsItsPartialOnly() throws {
+        let final = downloads("MockPeer/Music/song.bin")
+        let partial = downloads(".partials/MockPeer/Music/song.bin")
+        try FileManager.default.createDirectory(at: final.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try Data("keep me".utf8).write(to: final)
+        try FileManager.default.createDirectory(at: partial.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try Data(repeating: 0, count: 40).write(to: partial)
+
+        env.peer.denyQueueUploadReason = "File not shared."
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        env.client.download(username: "MockPeer", filename: "Music\\song.bin", size: 500)
+        assertEventually("the failed download was never recorded", timeout: 3) {
+            !env.client.recentFailedDownloads.transfers.isEmpty
+        }
+
+        let id = try XCTUnwrap(env.client.recentFailedDownloads.transfers.first?.id)
+        env.client.dismissFailedDownloads(ids: [id])
+
+        XCTAssertTrue(env.client.recentFailedDownloads.transfers.isEmpty)
+        assertEventually("the partial was not discarded", timeout: 3) {
+            !FileManager.default.fileExists(atPath: partial.path)
+        }
+        XCTAssertEqual(try? Data(contentsOf: final), Data("keep me".utf8),
+                       "dismissing a failure must not delete a finished file")
+    }
+
+    /// The swipe action on a failure row must delete it, unlike the "Cancel" action used for live
+    /// transfers, which `TransferManager` has already forgotten.
+    func testSwipingAFailedDownloadDeletesIt() {
+        env.peer.denyQueueUploadReason = "File not shared."
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        env.client.download(username: "MockPeer", filename: "Music\\swipe.bin", size: 500)
+        assertEventually("the failed download was never recorded", timeout: 3) {
+            !env.client.recentFailedDownloads.transfers.isEmpty
+        }
+
+        let controller = TransfersViewController(client: env.client)
+        controller.loadViewIfNeeded()
+
+        guard let tableView = firstView(of: UITableView.self, in: controller.view) else {
+            return XCTFail("the transfers screen has no table view")
+        }
+        let row = IndexPath(row: 0, section: 0)
+        XCTAssertEqual(tableView.numberOfRows(inSection: 0), 1)
+
+        guard let configuration = controller.tableView(
+                tableView, trailingSwipeActionsConfigurationForRowAt: row),
+              let action = configuration.actions.first else {
+            return XCTFail("the failure row has no swipe action")
+        }
+        XCTAssertEqual(action.title, "Delete")
+
+        action.handler(action, UIView(), { _ in })
+
+        XCTAssertTrue(env.client.recentFailedDownloads.transfers.isEmpty)
+        XCTAssertEqual(tableView.numberOfRows(inSection: 0), 0,
+                       "the deleted failure row stayed on screen")
+    }
+
+    /// Select All must include failure rows, which are rendered from the client's log rather than
+    /// from the controller's list of live transfers.
+    func testSelectingAllIncludesFailedDownloads() {
+        env.peer.denyQueueUploadReason = "File not shared."
+        XCTAssertTrue(env.connectAndWaitForLogin())
+
+        env.client.download(username: "MockPeer", filename: "Music\\select.bin", size: 500)
+        assertEventually("the failed download was never recorded", timeout: 3) {
+            !env.client.recentFailedDownloads.transfers.isEmpty
+        }
+
+        let controller = TransfersViewController(client: env.client)
+        controller.loadViewIfNeeded()
+
+        controller.perform(NSSelectorFromString("beginSelecting"))
+        controller.perform(NSSelectorFromString("toggleSelectAll"))
+
+        XCTAssertEqual(controller.navigationItem.rightBarButtonItems?.first?.title, "Delete (1)",
+                       "Select All skipped the failure row")
+    }
+
+    private func firstView<T: UIView>(of type: T.Type, in view: UIView) -> T? {
+        if let match = view as? T { return match }
+        for subview in view.subviews {
+            if let match = firstView(of: type, in: subview) { return match }
+        }
+        return nil
     }
 
     // MARK: Uploads

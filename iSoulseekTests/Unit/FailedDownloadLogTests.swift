@@ -81,4 +81,17 @@ final class FailedDownloadLogTests: XCTestCase {
         XCTAssertEqual(log.transfers.map(\.id), [2],
                        "matching is case-insensitive; other failures stay")
     }
+
+    func testRemoveReturnsTheDismissedFailures() {
+        var log = FailedDownloadLog()
+        log.record(failedTransfer(1))
+        log.record(failedTransfer(2))
+        log.record(failedTransfer(3))
+
+        let removed = log.remove(ids: [1, 3])
+
+        XCTAssertEqual(Set(removed.map(\.id)), [1, 3])
+        XCTAssertEqual(log.transfers.map(\.id), [2])
+        XCTAssertTrue(log.remove(ids: [99]).isEmpty, "unknown ids are a no-op")
+    }
 }
