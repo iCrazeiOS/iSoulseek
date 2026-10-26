@@ -314,6 +314,9 @@ private final class ChatMessageCell: UITableViewCell {
 
     static let reuseIdentifier = "ChatMessageCell"
 
+    private static let maximumEnlargedEmojiCount = 6
+    private static let enlargedEmojiPointSize: CGFloat = 40
+
     private let usernameLabel = UILabel()
     private let bodyLabel = WrappingLabel()
     private let stack = UIStackView()
@@ -357,15 +360,21 @@ private final class ChatMessageCell: UITableViewCell {
 
     func configure(with message: ChatMessage) {
         let bodyFont = UIFont.preferredFont(forTextStyle: .body)
+        bodyLabel.adjustsFontForContentSizeCategory = true
 
         switch message.kind {
         case .normal:
             usernameLabel.isHidden = false
             usernameLabel.text = message.username
             bodyLabel.text = message.text
-            bodyLabel.font = bodyFont
             bodyLabel.textColor = .label
             bodyLabel.textAlignment = .natural
+            if Self.isEmojiOnly(message.text) {
+                bodyLabel.font = .systemFont(ofSize: Self.enlargedEmojiPointSize)
+                bodyLabel.adjustsFontForContentSizeCategory = false
+            } else {
+                bodyLabel.font = bodyFont
+            }
 
         case .action:
             usernameLabel.isHidden = true
@@ -380,6 +389,44 @@ private final class ChatMessageCell: UITableViewCell {
             bodyLabel.font = .preferredFont(forTextStyle: .footnote)
             bodyLabel.textColor = .tertiaryLabel
             bodyLabel.textAlignment = .center
+        }
+    }
+
+    /// A short message made only of emoji is shown at a larger size. Whitespace between emoji is
+    /// allowed; anything else (letters, punctuation, more than six emoji) keeps the normal size.
+    private static func isEmojiOnly(_ text: String) -> Bool {
+        let characters = Array(text.filter { !$0.isWhitespace })
+        guard (1...maximumEnlargedEmojiCount).contains(characters.count) else { return false }
+        return characters.allSatisfy(isEmoji)
+    }
+
+    private static func isEmoji(_ character: Character) -> Bool {
+        let scalars = Array(character.unicodeScalars)
+        guard !scalars.isEmpty else { return false }
+
+        // ASCII digits, '#', and '*' carry the emoji property but are only emoji as part of a
+        // keycap sequence ("1️⃣"), which has more than one scalar.
+        if scalars.count == 1, let scalar = scalars.first, scalar.value < 0x80 { return false }
+
+        let hasEmojiPresentation = scalars.contains { $0.properties.isEmojiPresentation }
+        let hasVariationSelector = scalars.contains { $0.properties.isVariationSelector }
+        let hasJoiner = scalars.contains { $0.value == 0x200D }
+        let hasRegionalIndicator = scalars.contains { (0x1F1E6...0x1F1FF).contains($0.value) }
+        let hasKeycap = scalars.contains { $0.value == 0x20E3 }
+        let hasTag = scalars.contains { (0xE0020...0xE007F).contains($0.value) }
+
+        guard hasEmojiPresentation || hasVariationSelector || hasJoiner
+                || hasRegionalIndicator || hasKeycap || hasTag else {
+            return false
+        }
+
+        return scalars.allSatisfy { scalar in
+            scalar.properties.isEmoji
+                || scalar.properties.isEmojiModifier
+                || scalar.properties.isEmojiModifierBase
+                || scalar.properties.isVariationSelector
+                || scalar.value == 0x200D
+                || (0xE0020...0xE007F).contains(scalar.value)
         }
     }
 }
