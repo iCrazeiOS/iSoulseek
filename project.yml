@@ -84,6 +84,9 @@ targets:
           - UIApplicationShortcutItemType: com.icraze.iSoulseek.downloads
             UIApplicationShortcutItemTitle: View Downloads
             UIApplicationShortcutItemIconSymbolName: arrow.down.circle
+          - UIApplicationShortcutItemType: com.icraze.iSoulseek.chat
+            UIApplicationShortcutItemTitle: Chat
+            UIApplicationShortcutItemIconSymbolName: bubble.left.and.bubble.right
 
   iSoulseekTests:
     type: bundle.unit-test

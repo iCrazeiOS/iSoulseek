@@ -8,11 +8,13 @@ import Foundation
 enum AppTab: Int, CaseIterable {
     case search
     case downloads
+    case chat
 
     var displayName: String {
         switch self {
         case .search: return "Search"
         case .downloads: return "Downloads"
+        case .chat: return "Chat"
         }
     }
 
@@ -22,6 +24,7 @@ enum AppTab: Int, CaseIterable {
         switch self {
         case .search: return "com.icraze.iSoulseek.search"
         case .downloads: return "com.icraze.iSoulseek.downloads"
+        case .chat: return "com.icraze.iSoulseek.chat"
         }
     }
 

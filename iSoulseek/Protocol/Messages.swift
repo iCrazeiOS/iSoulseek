@@ -148,6 +148,11 @@ enum ServerRequest {
     case haveNoParent(Bool)
     case sendUploadSpeed(UInt32)
     case cantConnectToPeer(token: UInt32, username: String)
+    case joinRoom(name: String, isPrivate: Bool)
+    case leaveRoom(name: String)
+    case sayChatroom(room: String, message: String)
+    case acknowledgeMessage(id: UInt32)
+    case getRoomList
 
     var code: ServerCode {
         switch self {
@@ -165,6 +170,11 @@ enum ServerRequest {
         case .haveNoParent: return .haveNoParent
         case .sendUploadSpeed: return .sendUploadSpeed
         case .cantConnectToPeer: return .cantConnectToPeer
+        case .joinRoom: return .joinRoom
+        case .leaveRoom: return .leaveRoom
+        case .sayChatroom: return .sayChatroom
+        case .acknowledgeMessage: return .messageAcked
+        case .getRoomList: return .roomList
         }
     }
 
@@ -204,6 +214,18 @@ enum ServerRequest {
         case .cantConnectToPeer(let token, let username):
             writer.write(token)
             writer.write(string: username)
+        case .joinRoom(let name, let isPrivate):
+            writer.write(string: name)
+            writer.write(UInt32(isPrivate ? 1 : 0))
+        case .leaveRoom(let name):
+            writer.write(string: name)
+        case .sayChatroom(let room, let message):
+            writer.write(string: room)
+            writer.write(string: message)
+        case .acknowledgeMessage(let id):
+            writer.write(id)
+        case .getRoomList:
+            break
         }
         return writer.data
     }
@@ -220,6 +242,14 @@ enum ServerMessage {
     case parentSpeed(ratio: UInt32)
     case relogged
     case ping
+    case roomList([ChatRoom])
+    case joinedRoom(name: String, users: [ChatRoomUser])
+    case userJoined(room: String, user: ChatRoomUser)
+    case userLeft(room: String, username: String)
+    case chatMessage(room: String, username: String, text: String)
+    case privateMessage(id: UInt32, username: String, text: String, isNew: Bool)
+    case leftRoom(String)
+    case cantCreateRoom(String)
     case unhandled(code: UInt32)
 
     static func decode(code: UInt32, payload: Data) throws -> ServerMessage {
@@ -276,6 +306,105 @@ enum ServerMessage {
             let directories = try reader.readUInt32()
             return .userStats(username: username, averageSpeed: averageSpeed, uploads: uploads,
                               files: files, directories: directories)
+
+        case .roomList:
+            let roomCount = try reader.readCount(minimumBytesPerItem: 4)
+            var names: [String] = []
+            names.reserveCapacity(roomCount)
+            for _ in 0..<roomCount {
+                names.append(try reader.readString())
+            }
+
+            // The user counts are a parallel array. Old servers may stop after the names.
+            var counts: [UInt32] = []
+            if !reader.isAtEnd {
+                let countCount = try reader.readCount(minimumBytesPerItem: 4)
+                counts.reserveCapacity(countCount)
+                for _ in 0..<countCount {
+                    counts.append(try reader.readUInt32())
+                }
+            }
+
+            let rooms = names.enumerated().map { index, name in
+                ChatRoom(name: name, userCount: index < counts.count ? counts[index] : 0)
+            }
+            // Owned/member/operated private-room lists may follow; this screen only shows public
+            // rooms, so leave them unread rather than rejecting an otherwise valid response.
+            return .roomList(rooms)
+
+        case .joinRoom:
+            let name = try reader.readString()
+            let userCount = try reader.readCount(minimumBytesPerItem: 4)
+            var users: [ChatRoomUser] = []
+            users.reserveCapacity(userCount)
+            for _ in 0..<userCount {
+                users.append(ChatRoomUser(username: try reader.readString()))
+            }
+
+            // Every block below is parallel to the user list and optional on old servers.
+            if !reader.isAtEnd {
+                let statusCount = try reader.readCount(minimumBytesPerItem: 4)
+                for index in 0..<statusCount {
+                    let raw = try reader.readUInt32()
+                    if index < users.count {
+                        users[index].status = UserStatus(rawValue: raw) ?? .offline
+                    }
+                }
+            }
+            if !reader.isAtEnd {
+                let statsCount = try reader.readCount(minimumBytesPerItem: 20)
+                for _ in 0..<statsCount {
+                    try reader.skip(20) // average speed, uploads, unknown, files, directories
+                }
+            }
+            if !reader.isAtEnd {
+                let slotCount = try reader.readCount(minimumBytesPerItem: 4)
+                for _ in 0..<slotCount {
+                    _ = try reader.readUInt32()
+                }
+            }
+            if !reader.isAtEnd {
+                let countryCount = try reader.readCount(minimumBytesPerItem: 4)
+                for _ in 0..<countryCount {
+                    _ = try reader.readString()
+                }
+            }
+            return .joinedRoom(name: name, users: users)
+
+        case .userJoinedRoom:
+            let room = try reader.readString()
+            let username = try reader.readString()
+            var status = UserStatus.online
+            if !reader.isAtEnd {
+                status = UserStatus(rawValue: try reader.readUInt32()) ?? .online
+            }
+            return .userJoined(room: room, user: ChatRoomUser(username: username, status: status))
+
+        case .userLeftRoom:
+            let room = try reader.readString()
+            return .userLeft(room: room, username: try reader.readString())
+
+        case .sayChatroom:
+            let room = try reader.readString()
+            let username = try reader.readString()
+            let text = try reader.readString()
+            return .chatMessage(room: room, username: username, text: text)
+
+        case .messageUser:
+            let id = try reader.readUInt32()
+            _ = try reader.readUInt32() // timestamp; chat screens use the local receipt time
+            let username = try reader.readString()
+            let text = try reader.readString()
+            let isNew = reader.isAtEnd ? true : (try reader.readBool())
+            return .privateMessage(id: id, username: username, text: text, isNew: isNew)
+
+        case .leaveRoom:
+            let room = try reader.readString()
+            return .leftRoom(room)
+
+        case .cantCreateRoom:
+            let room = try reader.readString()
+            return .cantCreateRoom(room)
 
         case .checkPrivileges:
             return .privilegesRemaining(try reader.readUInt32())

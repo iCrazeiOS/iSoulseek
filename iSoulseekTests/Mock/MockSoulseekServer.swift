@@ -36,6 +36,11 @@ final class MockSoulseekServer {
     private var recordedCheckPrivilegesCount = 0
     private var recordedLogins: [(username: String, password: String, major: UInt32, minor: UInt32)] = []
     private var recordedCodeOrder: [UInt32] = []
+    private var recordedRoomListRequests = 0
+    private var recordedJoinRooms: [(room: String, type: UInt32)] = []
+    private var recordedSays: [(room: String, message: String)] = []
+    private var recordedLeaveRooms: [String] = []
+    private var recordedAcks: [UInt32] = []
 
     /// When set, the server reports this port for every user, so tests can break the direct route.
     var peerPortOverride: UInt16?
@@ -98,6 +103,11 @@ final class MockSoulseekServer {
     var logins: [(username: String, password: String, major: UInt32, minor: UInt32)] { queue.sync { recordedLogins } }
     /// Every message code the client sent, in order.
     var codeOrder: [UInt32] { queue.sync { recordedCodeOrder } }
+    var roomListRequests: Int { queue.sync { recordedRoomListRequests } }
+    var joinRooms: [(room: String, type: UInt32)] { queue.sync { recordedJoinRooms } }
+    var says: [(room: String, message: String)] { queue.sync { recordedSays } }
+    var leaveRooms: [String] { queue.sync { recordedLeaveRooms } }
+    var acks: [UInt32] { queue.sync { recordedAcks } }
 
     /// The most recent non-zero port the client asked to be reached on.
     var clientListeningPort: UInt16 {
@@ -172,11 +182,97 @@ final class MockSoulseekServer {
                 }
             }
 
+        case 64: // RoomList
+            recordedRoomListRequests += 1
+            replyWithRoomList(channel: channel)
+
+        case 14: // JoinRoom
+            let room = (try? reader.string()) ?? ""
+            let type = (try? reader.u32()) ?? 0
+            recordedJoinRooms.append((room, type))
+            replyToJoinRoom(room: room, channel: channel)
+
+        case 13: // SayChatroom
+            let room = (try? reader.string()) ?? ""
+            let message = (try? reader.string()) ?? ""
+            recordedSays.append((room, message))
+            var writer = MockWriter()
+            writer.string(room)
+            writer.string("testsoulseeker")
+            writer.string(message)
+            channel.send(code: 13, payload: writer.data)
+
+        case 15: // LeaveRoom
+            let room = (try? reader.string()) ?? ""
+            recordedLeaveRooms.append(room)
+            var writer = MockWriter()
+            writer.string(room)
+            channel.send(code: 15, payload: writer.data)
+
+        case 23: // MessageAcked
+            if let id = try? reader.u32() { recordedAcks.append(id) }
+
         case 121: // SendUploadSpeed
             if let value = try? reader.u32() { recordedUploadSpeeds.append(value) }
 
         default:
             break
+        }
+    }
+
+    private func replyWithRoomList(channel: MockChannel) {
+        var writer = MockWriter()
+        writer.u32(2)
+        writer.string("Music")
+        writer.string("Chat")
+        writer.u32(2)
+        writer.u32(12)
+        writer.u32(3)
+        channel.send(code: 64, payload: writer.data)
+    }
+
+    private func replyToJoinRoom(room: String, channel: MockChannel) {
+        let names = ["testsoulseeker", "bob"]
+        var writer = MockWriter()
+        writer.string(room)
+        writer.u32(UInt32(names.count))
+        for name in names { writer.string(name) }
+
+        writer.u32(UInt32(names.count))
+        writer.u32(2) // online
+        writer.u32(2) // online
+
+        writer.u32(UInt32(names.count))
+        for _ in names {
+            writer.u32(100) // average speed
+            writer.u32(0)   // uploads
+            writer.u32(0)   // unknown
+            writer.u32(10)  // files
+            writer.u32(2)   // directories
+        }
+
+        writer.u32(UInt32(names.count))
+        writer.u32(0) // slots free
+        writer.u32(0)
+
+        writer.u32(UInt32(names.count))
+        writer.string("US")
+        writer.string("DE")
+
+        channel.send(code: 14, payload: writer.data)
+    }
+
+    /// Sends a server notice the way the real server reports a rejected room name or join.
+    func sendServerNotice(_ text: String) {
+        queue.async { [weak self] in
+            guard let self, let channel = self.channels.first else { return }
+            var writer = MockWriter()
+            writer.u32(1)
+            writer.u32(UInt32(Date().timeIntervalSince1970))
+            writer.string("server")
+            writer.string(text)
+            writer.bool(true)
+            channel.send(code: 22, payload: writer.data)
         }
     }
 

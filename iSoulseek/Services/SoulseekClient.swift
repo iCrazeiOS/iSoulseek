@@ -70,6 +70,12 @@ final class SoulseekClient {
     let shares = CurrentValueSubject<ShareSnapshot, Never>(.empty)
     let listeningPort = CurrentValueSubject<UInt16, Never>(0)
     let excludedPhrases = CurrentValueSubject<[String], Never>([])
+    /// Public rooms from the last room-list response. A `CurrentValueSubject` so a Chat tab that
+    /// opens after login immediately sees the list the server sent on the login handshake.
+    let chatRoomList = CurrentValueSubject<[ChatRoom], Never>([])
+    /// Names of the rooms this session has joined, in join order.
+    let joinedRooms = CurrentValueSubject<[String], Never>([])
+    let chatEvents = PassthroughSubject<ChatEvent, Never>()
 
     let store: SessionStore
     let transferManager: TransferManager
@@ -102,6 +108,9 @@ final class SoulseekClient {
     private var port: UInt16 = 0
     private var ownUsername = ""
     private var currentState: ConnectionState = .disconnected
+    private var roomUsers: [String: [ChatRoomUser]] = [:]
+    private var roomOrder: [String] = []
+    private var chatMessageCounter: UInt64 = 0
     private var pingTimer: DispatchSourceTimer?
     private let tokenLock = NSLock()
     private var tokenCounter = UInt32.random(in: 1...(UInt32.max / 2))
@@ -170,6 +179,61 @@ final class SoulseekClient {
             self.searchResultCounts.removeValue(forKey: token)
             self.publish { self.searchFinished.send(token) }
         }
+    }
+
+    // MARK: Chat rooms
+
+    /// Asks the server for the complete public room list. The server also sends a partial list
+    /// automatically after login; this fills in the smaller rooms that list leaves out.
+    func requestRoomList() {
+        queue.async { self.send(.getRoomList) }
+    }
+
+    /// Joins a public room. Joining a room that does not exist creates it. If this session is
+    /// already in the room, the cached user list is republished instead of waiting for a response
+    /// the server will not send.
+    func joinRoom(_ name: String) {
+        guard let room = ChatRules.normalizedRoomName(name) else {
+            publish {
+                self.chatEvents.send(.error("Room names use 1–24 printable characters."))
+            }
+            return
+        }
+        queue.async {
+            if let users = self.roomUsers[room] {
+                self.publish { self.chatEvents.send(.joined(room: room, users: users)) }
+                return
+            }
+            AppLog.client.info("joining chat room \"\(room, privacy: .public)\"")
+            self.send(.joinRoom(name: room, isPrivate: false))
+        }
+    }
+
+    /// Leaves a room and forgets its user list. The server confirmation is harmless if it arrives
+    /// after the state has already been removed.
+    func leaveRoom(_ name: String) {
+        queue.async {
+            self.roomUsers.removeValue(forKey: name)
+            self.roomOrder.removeAll { $0 == name }
+            self.send(.leaveRoom(name: name))
+            self.publishJoinedRooms()
+            self.publish { self.chatEvents.send(.left(room: name)) }
+        }
+    }
+
+    /// Sends a line to a joined room. The message appears in the transcript only when the server
+    /// echoes it back, which also keeps the sender's copy in the same order as everyone else's.
+    func sendChatMessage(_ text: String, to room: String) {
+        guard let message = ChatRules.normalizedMessage(text) else { return }
+        queue.async {
+            guard self.roomUsers[room] != nil else { return }
+            self.send(.sayChatroom(room: room, message: message))
+        }
+    }
+
+    /// The current users in `name`, or an empty list when this session is not in the room.
+    func users(inRoom name: String) -> [ChatRoomUser] {
+        queue.sync { roomUsers[name] ?? [] }
     }
 
     func browse(username: String, completion: @escaping (Result<[ShareFolder], Error>) -> Void) {
@@ -307,6 +371,7 @@ final class SoulseekClient {
             self.server = nil
             self.stopPing()
             self.closeAllSessions()
+            self.resetChatLocked()
             if !wasFailed {
                 self.setState(.disconnected)
             }
@@ -338,6 +403,7 @@ final class SoulseekClient {
         addressCache.removeAll()
         pendingPierce.removeAll()
         fileDialsInFlight.removeAll()
+        resetChatLocked()
         transferManager.reset()
         setState(.disconnected)
         if let reason {
@@ -373,6 +439,7 @@ final class SoulseekClient {
             send(.watchUser(ownUsername))
             send(.setWaitPort(port))
             reportSharesLocked()
+            send(.getRoomList)
             startPing()
             publish {
                 self.messages.send(result.greeting.isEmpty ? "Connected to the Soulseek network" : result.greeting)
@@ -389,6 +456,60 @@ final class SoulseekClient {
 
         case .excludedSearchPhrases(let phrases):
             publish { self.excludedPhrases.send(phrases) }
+
+        case .roomList(let rooms):
+            publish { self.chatRoomList.send(rooms) }
+
+        case .joinedRoom(let name, let users):
+            if roomUsers[name] == nil {
+                roomOrder.append(name)
+            }
+            roomUsers[name] = users
+            publishJoinedRooms()
+            publish { self.chatEvents.send(.joined(room: name, users: users)) }
+
+        case .userJoined(let room, let user):
+            guard var users = roomUsers[room] else { break }
+            if let index = users.firstIndex(where: {
+                $0.username.caseInsensitiveCompare(user.username) == .orderedSame
+            }) {
+                users[index] = user
+            } else {
+                users.append(user)
+            }
+            roomUsers[room] = users
+            publish { self.chatEvents.send(.userJoined(room: room, user: user)) }
+
+        case .userLeft(let room, let username):
+            guard var users = roomUsers[room] else { break }
+            users.removeAll { $0.username.caseInsensitiveCompare(username) == .orderedSame }
+            roomUsers[room] = users
+            publish { self.chatEvents.send(.userLeft(room: room, username: username)) }
+
+        case .chatMessage(let room, let username, let text):
+            guard roomUsers[room] != nil else { break }
+            let message = makeChatMessage(room: room, username: username, text: text)
+            publish { self.chatEvents.send(.message(message)) }
+
+        case .privateMessage(let id, let username, let text, _):
+            // Acknowledge every private message, including server notices, or the server keeps
+            // replaying it on the next login. Only server notices are shown by this screen.
+            send(.acknowledgeMessage(id: id))
+            if username.caseInsensitiveCompare("server") == .orderedSame {
+                publish { self.chatEvents.send(.error(text)) }
+            }
+
+        case .leftRoom(let room):
+            if roomUsers.removeValue(forKey: room) != nil {
+                roomOrder.removeAll { $0 == room }
+                publishJoinedRooms()
+                publish { self.chatEvents.send(.left(room: room)) }
+            }
+
+        case .cantCreateRoom(let room):
+            publish {
+                self.chatEvents.send(.error("Could not join \(room). It may be private or its name may be invalid."))
+            }
 
         case .relogged:
             // Another client took over the session. Drop the saved password so this device does
@@ -974,6 +1095,37 @@ final class SoulseekClient {
     }
 
     // MARK: Helpers
+
+    private func makeChatMessage(room: String, username: String, text: String) -> ChatMessage {
+        chatMessageCounter &+= 1
+        let isServer = username.caseInsensitiveCompare("server") == .orderedSame
+        let kind: ChatMessageKind
+        var body = text
+        if isServer {
+            kind = .system
+        } else if text.hasPrefix("/me ") {
+            kind = .action
+            body = String(text.dropFirst(4))
+        } else {
+            kind = .normal
+        }
+        return ChatMessage(id: chatMessageCounter, room: room, username: username,
+                           text: body, timestamp: Date(), kind: kind)
+    }
+
+    private func publishJoinedRooms() {
+        let names = roomOrder
+        publish { self.joinedRooms.send(names) }
+    }
+
+    /// Drops room membership when the server session ends. Room names and transcripts are
+    /// client-side only, so there is nothing to restore until the user joins again.
+    private func resetChatLocked() {
+        roomUsers.removeAll()
+        roomOrder.removeAll()
+        publish { self.joinedRooms.send([]) }
+        publish { self.chatRoomList.send([]) }
+    }
 
     private func allocateToken() -> UInt32 {
         tokenLock.lock()

@@ -46,20 +46,28 @@
 	<key>UIApplicationShortcutItems</key>
 	<array>
 		<dict>
-			<key>UIApplicationShortcutItemType</key>
-			<string>com.icraze.iSoulseek.search</string>
-			<key>UIApplicationShortcutItemTitle</key>
-			<string>Search</string>
 			<key>UIApplicationShortcutItemIconSymbolName</key>
 			<string>magnifyingglass</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Search</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.icraze.iSoulseek.search</string>
 		</dict>
 		<dict>
-			<key>UIApplicationShortcutItemType</key>
-			<string>com.icraze.iSoulseek.downloads</string>
-			<key>UIApplicationShortcutItemTitle</key>
-			<string>View Downloads</string>
 			<key>UIApplicationShortcutItemIconSymbolName</key>
 			<string>arrow.down.circle</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>View Downloads</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.icraze.iSoulseek.downloads</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>bubble.left.and.bubble.right</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Chat</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.icraze.iSoulseek.chat</string>
 		</dict>
 	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

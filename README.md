@@ -23,8 +23,11 @@ dependencies.
   for the session. *Downloaded* has sorting, list/tree views, Quick Look, swipe delete, Show in
   Files and share. *Uploading* lists what others are taking from your share. *Select* does bulk
   cancel/delete, with *Select All* per tab.
-- **Home Screen shortcuts.** Long-pressing the icon offers *Search* and *View Downloads*, which open
-  straight to those tabs. Settings ▸ Startup picks which tab the app opens to normally.
+- **Chat.** Browse public rooms with their user counts, or join a room by name (a new name creates
+  the room). Each room has a live transcript, a member list with presence, and a composer. Pull to
+  refresh the room list; leaving the room screen leaves the room.
+- **Home Screen shortcuts.** Long-pressing the icon offers *Search*, *View Downloads* and *Chat*,
+  which open straight to those tabs. Settings ▸ Startup picks which tab the app opens to normally.
 - **Files.** Downloads land in `On My iPhone ▸ iSoulseek ▸ Downloads` under `<uploader>/<album>`.
   Partials stay hidden in `.partials` and resume on retry.
 - **Shares.** Everything in `On My iPhone ▸ iSoulseek ▸ Shared` is served to other users.
@@ -51,7 +54,7 @@ xcodebuild -project iSoulseek.xcodeproj -scheme iSoulseek \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
-About 180 unit and integration tests, including an in-process mock Soulseek server and peer that
+About 240 unit and integration tests, including an in-process mock Soulseek server and peer that
 speak the real wire protocol. Live tests are skipped unless you set
 `SOULSEEK_LIVE=1 SOULSEEK_LIVE_USER=<user> SOULSEEK_LIVE_PASS=<pass>` (use `TEST_RUNNER_`-prefixed
 names for the UI test). Use a throwaway account — unused names are registered.

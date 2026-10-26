@@ -7,7 +7,14 @@ enum ServerCode: UInt32 {
     case watchUser = 5
     case unwatchUser = 6
     case getUserStatus = 7
+    case sayChatroom = 13
+    case joinRoom = 14
+    case leaveRoom = 15
+    case userJoinedRoom = 16
+    case userLeftRoom = 17
     case connectToPeer = 18
+    case messageUser = 22
+    case messageAcked = 23
     case fileSearch = 26
     case setStatus = 28
     case serverPing = 32
@@ -15,6 +22,7 @@ enum ServerCode: UInt32 {
     case getUserStats = 36
     case relogged = 41
     case userSearch = 42
+    case roomList = 64
     case privilegedUsers = 69
     case haveNoParent = 71
     case parentMinSpeed = 83
@@ -28,6 +36,7 @@ enum ServerCode: UInt32 {
     case branchRoot = 127
     case excludedSearchPhrases = 160
     case cantConnectToPeer = 1001
+    case cantCreateRoom = 1003
 }
 
 enum PeerCode: UInt32 {

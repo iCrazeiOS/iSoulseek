@@ -5,6 +5,7 @@ final class MainTabBarController: UITabBarController {
 
     private static let searchIndex = 0
     private static let transfersIndex = 1
+    private static let chatIndex = 2
 
     private let client: SoulseekClient
     private var transfers: TransfersViewController?
@@ -28,11 +29,13 @@ final class MainTabBarController: UITabBarController {
         let search = SearchViewController(client: client)
         let transfers = TransfersViewController(client: client)
         self.transfers = transfers
+        let chat = ChatRoomsViewController(client: client)
         let settings = SettingsViewController(client: client)
 
         viewControllers = [
             wrap(search, title: "Search", symbol: "magnifyingglass"),
             wrap(transfers, title: "Transfers", symbol: "arrow.up.arrow.down"),
+            wrap(chat, title: "Chat", symbol: "bubble.left.and.bubble.right"),
             wrap(settings, title: "Settings", symbol: "gearshape"),
         ]
 
@@ -48,6 +51,8 @@ final class MainTabBarController: UITabBarController {
         case .downloads:
             selectedIndex = Self.transfersIndex
             transfers?.showTab(.downloaded)
+        case .chat:
+            selectedIndex = Self.chatIndex
         }
     }
 

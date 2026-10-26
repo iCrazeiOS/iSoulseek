@@ -21,6 +21,7 @@ final class AppTabTests: XCTestCase {
     func testQuickActionTypesMapToTabs() {
         XCTAssertEqual(AppTab(shortcutType: AppTab.search.shortcutType), .search)
         XCTAssertEqual(AppTab(shortcutType: AppTab.downloads.shortcutType), .downloads)
+        XCTAssertEqual(AppTab(shortcutType: AppTab.chat.shortcutType), .chat)
         XCTAssertNil(AppTab(shortcutType: "com.icraze.iSoulseek.unknown"))
     }
 

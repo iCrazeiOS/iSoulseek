@@ -76,18 +76,25 @@ A `success` field of `0` means the server closed the connection (ban) before sen
 | 3 | GetPeerAddress | send `string user`; recv `string user, u32 ip, u32 port, u32 obfType, u16 obfPort` |
 | 5 / 6 | WatchUser / UnwatchUser | `string user` |
 | 7 | GetUserStatus | send `string user`; recv `string user, u32 status, bool privileged` (0 offline, 1 away, 2 online) |
+| 13 | SayChatroom | send `string room, string message`; recv `string room, string username, string message` |
+| 14 | JoinRoom | send `string room, u32 type` (0 public, 1 private); recv room + parallel user/status/stats/slot/country lists |
+| 15 | LeaveRoom | send `string room`; recv `string room` |
+| 16 / 17 | UserJoinedRoom / UserLeftRoom | `string room, string username` (16 may carry status/stats afterwards) |
 | 18 | ConnectToPeer | send `u32 token, string user, string type`; recv `string user, string type, u32 ip, u32 port, u32 token, bool privileged, u32 obfType, u32 obfPort` |
+| 22 / 23 | MessageUser / MessageAcked | send `string user, string message`; recv `u32 id, u32 timestamp, string user, string message, bool isNew`; ack `u32 id` |
 | 26 | FileSearch | send `u32 token, string query` |
 | 28 | SetStatus | `u32 status` |
 | 32 | ServerPing | empty |
 | 35 | SharedFoldersFiles | `u32 dirs, u32 files` |
 | 36 | GetUserStats | send `string user`; recv `string user, u32 avgSpeed, u32 uploads, u32 unknown, u32 files, u32 dirs` |
 | 41 | Relogged | stop the session |
+| 64 | RoomList | send empty; recv `u32 count, string[count] names, u32 count, u32[count] userCounts` plus optional private-room lists |
 | 69 | PrivilegedUsers | `u32 count, string[count]` — ignore |
 | 71 | HaveNoParent | `bool noParent` |
 | 83 / 84 | ParentMinSpeed / ParentSpeedRatio | `u32` — informational |
 | 92 | CheckPrivileges | empty → `u32 secondsLeft` |
 | 1001 | CantConnectToPeer | send `u32 token, string user`; recv `u32 token` |
+| 1003 | CantCreateRoom | `string room` — the server may also explain the reason in a code 22 notice from `server` |
 | 160 | ExcludedSearchPhrases | `u32 count, string[count]` — must filter outgoing result paths |
 
 Unrecognised server codes are ignored (the payload is known from the frame header).
@@ -219,3 +226,47 @@ The cost is that the client does not receive other users' global searches.
 - Cap concurrent peer connections and inbound uploads.
 - Filter outgoing search results with the server's `ExcludedSearchPhrases`.
 - Report real share counts via `SharedFoldersFiles`.
+
+## 9. Chat rooms
+
+All chat traffic is server-routed; no peer connection is involved.
+
+### Joining and membership
+
+1. Send `JoinRoom(room, 0)` (public) after login. The response is
+   `string room, u32 userCount, string[userCount] users`, then parallel lists:
+   `u32 count, u32[count] statuses`; `u32 count, { u32 avgSpeed, u32 uploads, u32 unknown,
+   u32 files, u32 dirs }[count]`; `u32 count, u32[count] slotsFull`; and
+   `u32 count, string[count] countryCodes`. Private rooms append owner/operator lists.
+   Old servers may stop after the user names, so every trailing block is optional.
+2. Joining a name that does not exist creates a public room. Joining a room already joined is
+   silently ignored by the server, so the client answers from its cached user list instead.
+3. `UserJoinedRoom` (16) and `UserLeftRoom` (17) update the member list.
+4. `LeaveRoom` (15) returns the room name; an unsolicited 15 is a kick and is handled the same way.
+
+### Messages
+
+- `SayChatroom` (13) is both directions. The server echoes a sent line to every member,
+  **including the sender**, so the client appends only on the echo rather than optimistically.
+  Receive payload: `string room, string username, string message`.
+- There is no server-side history. Joining shows the current members and tickers, not old lines.
+- `username == "server"` is a system notice. A `/me ` prefix is a client convention and is
+  rendered as an action.
+- Messages containing `\r` or `\n` are dropped by the server; the client replaces them with spaces.
+- Private messages (22) carry `u32 id, u32 timestamp, string username, string message, bool isNew`.
+  Every one must be acknowledged with 23 (`u32 id`), or the server replays it on the next login.
+  Server notices also arrive as 22 from `server` and are acked the same way.
+
+### Room list
+
+- `RoomList` (64) is a request with an empty payload and a response with parallel name/count arrays.
+  The server also sends a partial list automatically after login; an explicit request returns the
+  complete list, including smaller rooms.
+- There is no incremental room-list push. The client requests it after login and on pull-to-refresh.
+
+### Limits and validation
+
+- Room names: 1–24 printable ASCII characters, no leading/trailing spaces, no double spaces.
+  Identity is case-sensitive.
+- Chat lines: the reference server caps a message at 2048 UTF-8 bytes and a ticker at 1024 bytes.
+- Usernames: 1–30 printable ASCII characters; `server` is reserved.
