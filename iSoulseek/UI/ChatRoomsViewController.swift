@@ -148,15 +148,14 @@ final class ChatRoomsViewController: UIViewController {
     }
 
     private func configureLayout() {
+        searchBar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(searchBar)
+
         tableView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tableView)
 
         messageView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(messageView)
-
-        // Added last so it stays above the empty-state overlay.
-        searchBar.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(searchBar)
 
         NSLayoutConstraint.activate([
             searchBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor,
