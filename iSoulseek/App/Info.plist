@@ -55,7 +55,7 @@
 		</dict>
 		<dict>
 			<key>UIApplicationShortcutItemIconSymbolName</key>
-			<string>arrow.down.circle</string>
+			<string>arrow.down</string>
 			<key>UIApplicationShortcutItemTitle</key>
 			<string>View Downloads</string>
 			<key>UIApplicationShortcutItemType</key>

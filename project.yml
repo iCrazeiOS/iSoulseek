@@ -83,7 +83,7 @@ targets:
             UIApplicationShortcutItemIconSymbolName: magnifyingglass
           - UIApplicationShortcutItemType: com.icraze.iSoulseek.downloads
             UIApplicationShortcutItemTitle: View Downloads
-            UIApplicationShortcutItemIconSymbolName: arrow.down.circle
+            UIApplicationShortcutItemIconSymbolName: arrow.down
           - UIApplicationShortcutItemType: com.icraze.iSoulseek.chat
             UIApplicationShortcutItemTitle: Chat
             UIApplicationShortcutItemIconSymbolName: bubble.left.and.bubble.right
